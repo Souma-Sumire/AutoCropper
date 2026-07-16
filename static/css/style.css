@@ -1,0 +1,510 @@
+/* 基础与主题设定 */
+:root {
+    --bg-primary: #1e1e1e;
+    --bg-secondary: #252526;
+    --border-color: #3c3c3c;
+    --text-main: #d4d4d4;
+    --text-muted: #858585;
+    --accent-color: #007acc;
+    --accent-hover: #1f8ad2;
+    --grid-bg: #2d2d2d;
+    --console-bg: #000000;
+    --crop-outline: #ffff00;
+}
+
+body.light-theme {
+    --bg-primary: #f3f4f6;
+    --bg-secondary: #ffffff;
+    --border-color: #d1d5db;
+    --text-main: #1f2937;
+    --text-muted: #6b7280;
+    --accent-color: #2563eb;
+    --accent-hover: #1d4ed8;
+    --grid-bg: #e5e7eb;
+    --console-bg: #f9fafb;
+    --crop-outline: #ff0000;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: Consolas, Monaco, "Courier New", "Microsoft YaHei", monospace;
+}
+
+body {
+    background-color: var(--bg-primary);
+    color: var(--text-main);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+}
+
+
+
+/* 主体区 */
+.main-container {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* 左侧控制栏 */
+.sidebar {
+    width: 340px;
+    background-color: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    padding: 15px;
+    overflow: hidden; /* 防止侧边栏整体滚动，使内部列表可弹性拉伸 */
+}
+
+.sidebar-section {
+    margin-bottom: 20px;
+    flex-shrink: 0; /* 防止普通配置面板被挤压 */
+}
+
+/* 可弹性的文件列表面板 */
+.sidebar-section.file-list-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 150px;
+    overflow: hidden;
+}
+
+#fileListContainer {
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-primary);
+    margin-top: 10px;
+}
+
+.sidebar-section h3 {
+    font-size: 12px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 4px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.ctrl-group {
+    margin-bottom: 12px;
+}
+
+.ctrl-label-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    margin-bottom: 4px;
+}
+
+.ctrl-input-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.ctrl-input-row input[type="range"] {
+    flex: 1;
+    height: 4px;
+    accent-color: var(--accent-color);
+}
+
+.ctrl-input-row input[type="number"], .ctrl-input-row select {
+    width: 65px;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    padding: 2px 4px;
+    font-size: 11px;
+    text-align: right;
+}
+
+.ctrl-input-row select {
+    width: 100%;
+    text-align: left;
+}
+
+.radio-group {
+    display: flex;
+    gap: 15px;
+    font-size: 11px;
+}
+
+.btn-primary {
+    width: 100%;
+    background-color: var(--accent-color);
+    border: 1px solid var(--border-color);
+    color: #ffffff;
+    padding: 8px;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-top: 10px;
+}
+
+.btn-primary:hover {
+    background-color: var(--accent-hover);
+}
+
+.btn-primary:disabled {
+    background-color: var(--bg-primary);
+    color: var(--text-muted);
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    width: 100%;
+    background-color: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    padding: 8px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-top: 10px;
+}
+
+.btn-secondary:hover {
+    background-color: var(--bg-primary);
+}
+
+/* 右侧工作区 */
+.workspace {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--bg-primary);
+}
+
+.tabs-bar {
+    display: flex;
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.tab-item {
+    padding: 8px 20px;
+    font-size: 11px;
+    border-right: 1px solid var(--border-color);
+    cursor: pointer;
+    background-color: var(--bg-secondary);
+}
+
+.tab-item.active {
+    background-color: var(--bg-primary);
+    border-bottom: 2px solid var(--accent-color);
+}
+
+.canvas-container {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+    overflow: auto;
+    background-color: var(--grid-bg);
+    position: relative;
+}
+
+/* 上传遮罩层 */
+.upload-box {
+    border: 2px dashed var(--border-color);
+    padding: 40px;
+    text-align: center;
+    cursor: pointer;
+    background-color: var(--bg-secondary);
+    max-width: 480px;
+    width: 100%;
+}
+
+.upload-box:hover {
+    border-color: var(--accent-color);
+}
+
+.upload-box p {
+    font-size: 12px;
+    margin-top: 10px;
+    color: var(--text-muted);
+}
+
+/* 画布 */
+canvas#previewCanvas {
+    max-width: 100%;
+    max-height: 100%;
+    border: 1px solid var(--border-color);
+    display: none;
+    background-color: var(--bg-primary);
+}
+
+/* 底部日志栏 */
+.console-panel {
+    height: 150px;
+    background-color: var(--console-bg);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+}
+
+.console-title {
+    font-size: 10px;
+    color: var(--text-muted);
+    padding: 5px 15px;
+    border-bottom: 1px solid var(--border-color);
+    text-transform: uppercase;
+}
+
+textarea#consoleLog {
+    flex: 1;
+    background-color: transparent;
+    border: none;
+    color: var(--text-main);
+    padding: 10px 15px;
+    font-size: 11px;
+    resize: none;
+    outline: none;
+    line-height: 1.5;
+}
+
+/* 批量文件列表样式 */
+.file-item {
+    padding: 6px 10px;
+    font-size: 11px;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: var(--bg-secondary);
+}
+
+.file-item:hover {
+    background-color: var(--bg-primary);
+}
+
+.file-item.active {
+    background-color: var(--accent-color);
+    color: #ffffff;
+}
+
+.file-item .badge {
+    background: var(--border-color);
+    color: var(--text-main);
+    padding: 1px 4px;
+    font-size: 9px;
+}
+
+.file-item.active .badge {
+    background: #ffffff;
+    color: var(--accent-color);
+}
+
+/* 级联画布页面组件样式 (左右横向分栏，左图右参) */
+.canvas-page {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    padding: 15px;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 20px;
+    width: 100%;
+    max-width: 1024px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+.canvas-page.active {
+    border-color: var(--accent-color);
+}
+
+/* 左侧 Canvas 大图区 */
+.canvas-page-left {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    min-width: 300px;
+}
+
+.canvas-page-header {
+    font-size: 11px;
+    color: var(--text-muted);
+    width: 100%;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    font-family: monospace;
+}
+
+.canvas-page canvas {
+    max-width: 100%;
+    height: auto;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-primary);
+}
+
+/* 右侧专属调参小控制面板 */
+.canvas-page-right {
+    width: 290px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border-color);
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 550px;
+    overflow-y: auto;
+}
+
+.canvas-page-right h4 {
+    font-size: 11px;
+    color: var(--accent-color);
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 3px;
+    margin: 5px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* 导入进度 */
+.import-progress {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+}
+
+.import-progress-text {
+    font-size: 11px;
+    color: var(--accent-color);
+    margin-bottom: 6px;
+}
+
+.import-progress-track {
+    height: 6px;
+    background: var(--border-color);
+    overflow: hidden;
+}
+
+.import-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent-color);
+    transition: width 0.15s ease;
+}
+
+.flat-export-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-main);
+    cursor: pointer;
+    line-height: 1.4;
+}
+
+.flat-export-label input {
+    margin-top: 2px;
+}
+
+/* 矫正预览条 */
+.crop-preview-panel {
+    margin-top: 12px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 10px;
+}
+
+.crop-preview-title {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: baseline;
+}
+
+.crop-preview-title .hint {
+    color: var(--text-muted);
+    font-size: 10px;
+    opacity: 0.85;
+}
+
+.crop-preview-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.crop-preview-item {
+    width: 132px;
+    border: 2px solid var(--border-color);
+    background: var(--bg-primary);
+    cursor: pointer;
+    padding: 5px;
+    position: relative;
+}
+
+.crop-preview-item:hover {
+    border-color: var(--accent-color);
+}
+
+.crop-preview-item.selected {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 1px var(--accent-color);
+}
+
+.crop-preview-item img {
+    display: block;
+    width: 100%;
+    height: 108px;
+    object-fit: contain;
+    background: #111;
+}
+
+.crop-preview-item .crop-label {
+    display: block;
+    margin-top: 4px;
+    font-size: 10px;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.crop-preview-item .flip-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: var(--accent-color);
+    color: #fff;
+    font-size: 9px;
+    padding: 1px 4px;
+    font-weight: bold;
+}
+
+.import-banner {
+    width: 100%;
+    max-width: 640px;
+    margin: 20px auto;
+    padding: 24px 28px;
+    border: 1px dashed var(--accent-color);
+    background: var(--bg-secondary);
+    text-align: center;
+}
+
+.import-banner .title {
+    font-size: 13px;
+    font-weight: bold;
+    margin-bottom: 8px;
+    color: var(--text-main);
+}
+
+.import-banner .sub {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
