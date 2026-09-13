@@ -286,8 +286,8 @@ body {
     justify-content: space-between;
     gap: 16px;
     padding: 14px;
-    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    border: 1px solid var(--border-color);
+    transition: border-color 0.15s ease;
     position: relative;
 }
 
@@ -310,84 +310,62 @@ body {
     overflow-y: auto;
 }
 
-/* 奇数页斑马纹：深冷灰碳素底 + 工业冷蓝灰边标 */
+/* 奇数页斑马纹：深冷灰底 */
 .stream-page:nth-child(odd) {
-    background-color: #181a1d;
-    border: 1px solid #2b3038;
-    border-left: 6px solid #3d6083;
+    background-color: #191b1f;
+    border-color: #282b32;
 }
 
 .stream-page:nth-child(odd) .stream-page-header {
-    background-color: #20242b;
-    border-bottom: 1px solid #2c323c;
-}
-
-.stream-page:nth-child(odd) .stream-page-num {
-    background-color: #27374a;
-    color: #7bb5f5;
-    border: 1px solid #395270;
-    padding: 1px 8px;
-    font-weight: 700;
+    background-color: #1f2228;
+    border-bottom: 1px solid #282b32;
 }
 
 .stream-page:nth-child(odd) .stream-canvas-box {
-    background-color: #0b0d10;
+    background-color: #0d0e11;
 }
 
 .stream-page:nth-child(odd) .stream-crops-box {
-    background-color: #181a1d;
-    border-top: 1px solid #2b3038;
+    background-color: #191b1f;
+    border-top: 1px solid #282b32;
 }
 
-/* 偶数页斑马纹：深暖黑木炭底 + 工业琥珀金灰边标 */
+/* 偶数页斑马纹：略亮深冷灰底，形成清晰工整的视觉区分 */
 .stream-page:nth-child(even) {
-    background-color: #1d1c19;
-    border: 1px solid #39362e;
-    border-left: 6px solid #826c3c;
+    background-color: #1e2025;
+    border-color: #2e323a;
 }
 
 .stream-page:nth-child(even) .stream-page-header {
-    background-color: #272520;
-    border-bottom: 1px solid #3a362d;
-}
-
-.stream-page:nth-child(even) .stream-page-num {
-    background-color: #3d3424;
-    color: #e2bd6c;
-    border: 1px solid #5a4b30;
-    padding: 1px 8px;
-    font-weight: 700;
+    background-color: #24272f;
+    border-bottom: 1px solid #2e323a;
 }
 
 .stream-page:nth-child(even) .stream-canvas-box {
-    background-color: #100f0c;
+    background-color: #0d0e11;
 }
 
 .stream-page:nth-child(even) .stream-crops-box {
-    background-color: #1d1c19;
-    border-top: 1px solid #39362e;
+    background-color: #1e2025;
+    border-top: 1px solid #2e323a;
 }
 
-/* 激活聚焦卡片高亮 */
+/* 激活聚焦卡片高亮：保持 1px 精准工业边界 */
 .stream-page.active {
     border-color: var(--accent-blue) !important;
-    border-left: 8px solid #0098ff !important;
-    box-shadow: 0 0 0 1px #0098ff, 0 6px 24px rgba(0, 0, 0, 0.65) !important;
 }
 
 .stream-page.active .stream-page-header {
-    background-color: #172a3e !important;
-    border-bottom: 1px solid #007acc !important;
+    border-bottom: 1px solid var(--accent-blue) !important;
 }
 
 .stream-page.active .stream-page-num {
-    background-color: var(--accent-blue) !important;
-    color: #ffffff !important;
-    border-color: var(--accent-blue) !important;
+    color: var(--accent-blue) !important;
+    font-weight: 700;
 }
 
 .stream-page.active .stream-canvas {
-    border-color: rgba(0, 152, 255, 0.8) !important;
+    border-color: rgba(0, 122, 204, 0.6) !important;
 }
 
 .stream-page-header {
@@ -452,24 +430,9 @@ body {
 
 .stream-crops-box {
     border-top: 1px solid var(--border-color);
-    padding: 10px 14px;
+    padding: 6px 12px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-}
-
-.stream-crops-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 12px;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-}
-
-.stream-crops-tip {
-    color: var(--text-muted);
-    font-size: 11px;
 }
 
 .stream-crop-strip {
@@ -478,8 +441,8 @@ body {
     gap: 8px;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 4px 0 6px 0;
-    min-height: 100px;
+    padding: 4px 0;
+    min-height: 88px;
 }
 
 canvas#mainCanvas {
