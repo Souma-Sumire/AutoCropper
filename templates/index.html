@@ -7,10 +7,13 @@
 </head>
 <body>
     <div class="workbench-layout">
-        <!-- 1. 左侧面板：文件输入与导出归档 -->
+        <!-- 1. 左侧面板：文件输入与导出 -->
         <aside class="panel-left">
             <div class="panel-section file-manager-section">
-                <div class="section-header">输入源与扫描件</div>
+                <div class="section-header">
+                    <span>扫描件列表</span>
+                    <span class="draft-indicator" id="draftIndicator" title="编辑进度实时保存在浏览器缓存，按 Ctrl+S 立即暂存">● 草稿已暂存</span>
+                </div>
                 <div class="ctrl-group">
                     <input type="file" id="fileInput" accept="image/*" multiple style="display: none;">
                     <div style="display: flex; gap: 6px;">
@@ -19,57 +22,54 @@
                     </div>
                 </div>
                 <div id="batchSummary" class="summary-badge">0 个文件 · 共 0 张子图</div>
-                <div class="state-save-indicator" id="stateSaveIndicator">● 状态自动保存 (Ctrl+S 立即保存)</div>
                 <div id="fileListContainer" class="file-list-box"></div>
             </div>
 
+            <!-- 导出设置：经典高密度平铺表单，零嵌套卡片 -->
             <div class="panel-section export-section">
-                <div class="section-header">批量导出与归档</div>
+                <div class="section-header">
+                    <span>导出切片</span>
+                </div>
+
                 <div class="ctrl-group">
-                    <div class="ctrl-label-row"><span>导出保存位置</span></div>
-                    <div class="save-location-group">
-                        <label class="radio-row path-radio-label">
-                            <input type="radio" name="exportPathOption" value="custom" id="exportRadioCustom">
-                            <span>保存到：</span>
-                        </label>
-                        <div class="path-input-wrap">
-                            <input type="text" id="customPathInput" class="text-input" placeholder="例如: D:\Pictures\BandiView" disabled>
-                        </div>
-
-                        <label class="radio-row path-radio-label" style="margin-top: 8px;">
-                            <input type="radio" name="exportPathOption" value="subfolder" id="exportRadioSubfolder" checked>
-                            <span>存储到名称如下的子文件夹</span>
-                        </label>
-                        <div class="path-input-wrap">
-                            <input type="text" id="subfolderInput" class="text-input" value="output" placeholder="子文件夹名称，默认 output">
-                        </div>
-
-                        <label class="radio-row path-radio-label" style="margin-top: 8px;">
-                            <input type="radio" name="exportPathOption" value="zip" id="exportRadioZip">
-                            <span>打包下载压缩包 (ZIP)</span>
-                        </label>
-                    </div>
+                    <div class="ctrl-label-row"><span>保存位置</span></div>
+                    <select id="exportPathModeSelect" class="select-input">
+                        <option value="subfolder" selected>原图同级子目录 (output/)</option>
+                        <option value="custom">指定电脑绝对路径...</option>
+                        <option value="zip">打包下载压缩包 (.zip)</option>
+                    </select>
+                    <input type="text" id="customPathInput" class="text-input" placeholder="输入绝对路径，如: D:\Pictures\Output" style="display: none; margin-top: 4px;">
+                    <input type="text" id="subfolderInput" class="text-input" value="output" placeholder="子文件夹名称，默认 output" style="margin-top: 4px;">
                     <input type="hidden" id="exportType" value="local">
                 </div>
+
                 <div class="ctrl-group">
-                    <div class="ctrl-label-row"><span>图片存储格式</span></div>
+                    <div class="ctrl-label-row"><span>图片格式</span></div>
                     <select id="exportFormat" class="select-input">
-                        <option value="jpg" selected>JPG (最高画质 / 快速体积小)</option>
+                        <option value="jpg" selected>JPG (高质量 / 体积小 / 快速)</option>
                         <option value="png">PNG (无损原画 / 体积较大)</option>
                     </select>
                 </div>
+
                 <div class="ctrl-group">
-                    <div class="ctrl-label-row"><span>自定义命名模板</span></div>
+                    <div class="ctrl-label-row">
+                        <span>命名模板</span>
+                        <span class="help-tooltip" title="通配符: {original} 原文件名, {index:02d} 两位编号, {date} 导出日期">?</span>
+                    </div>
                     <input type="text" id="namingTemplate" value="{original}_{index:02d}" class="text-input">
-                    <div class="tip-text">通配符: {original} 原名, {index:02d} 两位序号, {index} 序号</div>
                 </div>
+
                 <div class="ctrl-group">
                     <label class="checkbox-row">
                         <input type="checkbox" id="flatExport">
-                        <span>不建子目录（全部平铺导出）</span>
+                        <span>平铺导出（不建子文件夹）</span>
                     </label>
                 </div>
-                <button id="exportBtn" class="btn-primary" disabled>开始执行图像裁剪</button>
+
+                <div class="export-action-block">
+                    <button id="exportBtn" class="btn-primary" style="height: 32px;" disabled>保存全部切片 (共 0 张)</button>
+                    <div class="export-dest-hint" id="exportDestHint">目标: 原图目录/output</div>
+                </div>
             </div>
         </aside>
 
