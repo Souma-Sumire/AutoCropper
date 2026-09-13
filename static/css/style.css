@@ -520,3 +520,44 @@ textarea#consoleLog {
     color: var(--text-muted);
 }
 
+.tool-btn-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.tool-btn-grid.full-width {
+    grid-template-columns: 1fr;
+}
+
+.btn-mini {
+    background-color: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    padding: 4px 6px;
+    font-size: 11px;
+    cursor: pointer;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.btn-mini:hover {
+    background-color: var(--bg-primary);
+    border-color: var(--accent-color);
+}
+
+.btn-mini:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.multi-select-badge {
+    background: var(--accent-color);
+    color: #fff;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-weight: bold;
+    border-radius: 2px;
+}
+

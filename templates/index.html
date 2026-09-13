@@ -45,6 +45,24 @@
                     </select>
                 </div>
                 <div class="ctrl-group">
+                    <div class="ctrl-label-row">
+                        <span>图片存储格式</span>
+                    </div>
+                    <select id="exportFormat">
+                        <option value="jpg" selected>JPG (最高画质 / 快速体积小)</option>
+                        <option value="png">PNG (无损原画 / 体积较大)</option>
+                    </select>
+                </div>
+                <div class="ctrl-group">
+                    <div class="ctrl-label-row">
+                        <span>自定义命名模板</span>
+                    </div>
+                    <input type="text" id="namingTemplate" value="{original}_crop_{index:02d}" style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-main); padding: 4px 6px; font-size: 11px; font-family: monospace;">
+                    <div style="font-size: 10px; color: var(--text-muted); margin-top: 3px; line-height: 1.3;">
+                        通配符: {original} 原名, {index:02d} 补零序号, {index} 纯数字, {date} 日期
+                    </div>
+                </div>
+                <div class="ctrl-group">
                     <label class="flat-export-label">
                         <input type="checkbox" id="flatExport">
                         <span>不建立子文件夹（全部导出到同一目录）</span>

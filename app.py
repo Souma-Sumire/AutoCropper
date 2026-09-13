@@ -64,6 +64,65 @@ def upload_image():
         "thumbnail": f"data:image/png;base64,{thumbnail_base64}"
     })
 
+@app.route('/api/estimate_threshold', methods=['POST'])
+def estimate_threshold():
+    data = request.get_json() or {}
+    session_id = data.get("session_id")
+    file_id = data.get("file_id")
+    bg_type = data.get("bg_type", "light")
+
+    session_path = os.path.join(UPLOAD_DIR, session_id, file_id)
+    preview_path = os.path.join(session_path, "preview.png")
+    if not os.path.exists(preview_path):
+        return jsonify({"error": "找不到预览文件"}), 404
+
+    preview_img = cv2.imread(preview_path)
+    if preview_img is None:
+        return jsonify({"error": "读取预览文件失败"}), 500
+
+    gray = cv2.cvtColor(preview_img, cv2.COLOR_BGR2GRAY)
+    best_thresh = ImageCropper.estimate_best_threshold(gray, bg_type)
+    return jsonify({"threshold": best_thresh})
+
+@app.route('/api/auto_orient', methods=['POST'])
+def auto_orient():
+    data = request.get_json() or {}
+    session_id = data.get("session_id")
+    file_id = data.get("file_id")
+    rects = data.get("rects", [])
+    bg_type = data.get("bg_type", "light")
+    auto_rotate = bool(data.get("auto_rotate", True))
+
+    session_path = os.path.join(UPLOAD_DIR, session_id, file_id)
+    preview_path = os.path.join(session_path, "preview.png")
+    if not os.path.exists(preview_path):
+        return jsonify({"error": "找不到预览文件"}), 404
+
+    preview_img = cv2.imread(preview_path)
+    if preview_img is None:
+        return jsonify({"error": "读取预览文件失败"}), 500
+
+    changed_count = 0
+    for r in rects:
+        if r.get("excluded"):
+            continue
+        crop = ImageCropper.extract_crop(
+            preview_img, r, scale_x=1.0, scale_y=1.0, auto_rotate=auto_rotate, bg_type=bg_type
+        )
+        if crop is not None and crop.size > 0:
+            predicted_deg = ImageCropper.predict_orientation(crop)
+            if predicted_deg != 0:
+                current_orient = int(r.get("orient", 0) or 0)
+                new_orient = (current_orient + predicted_deg) % 360
+                r["orient"] = new_orient
+                changed_count += 1
+
+    return jsonify({
+        "rects": rects,
+        "changed_count": changed_count,
+        "message": f"已智能校正 {changed_count} 张照片的朝向。"
+    })
+
 @app.route('/api/preview', methods=['POST'])
 def preview_crops():
     data = request.get_json() or {}
@@ -71,6 +130,8 @@ def preview_crops():
     file_id = data.get("file_id")
     blur_kernel = int(data.get("blur_kernel", 3))
     threshold_val = int(data.get("threshold", 200))
+    threshold_mode = data.get("threshold_mode", "fixed")
+    morph_size = int(data.get("morph_size", 0))
     bg_type = data.get("bg_type", "light")
     min_area_pct = float(data.get("min_area_pct", 0.8))
     max_area_pct = float(data.get("max_area_pct", 80.0))
@@ -86,7 +147,9 @@ def preview_crops():
     gray = cv2.cvtColor(preview_img, cv2.COLOR_BGR2GRAY)
     
     start_time = time.time()
-    blurred, thresh = ImageCropper.process_preview(gray, blur_kernel, threshold_val, bg_type)
+    blurred, thresh = ImageCropper.process_preview(
+        gray, blur_kernel, threshold_val, bg_type, threshold_mode=threshold_mode, morph_size=morph_size
+    )
     rects, filtered_count = ImageCropper.detect_rects(thresh, min_area_pct, max_area_pct, padding)
     elapsed_ms = int((time.time() - start_time) * 1000)
     
@@ -98,7 +161,7 @@ def preview_crops():
         _, buffer = cv2.imencode('.png', blurred)
         debug_image_base64 = f"data:image/png;base64,{base64.b64encode(buffer).decode('utf-8')}"
         
-    log_msg = f"检测到轮廓 {len(rects) + filtered_count} 个。保留 {len(rects)} 个，过滤噪点 {filtered_count} 个。耗时: {elapsed_ms}ms。"
+    log_msg = f"检测到轮廓 {len(rects) + filtered_count} 个。保留 {len(rects)} 个，过滤噪点 {filtered_count} 个。模式: {threshold_mode}，耗时: {elapsed_ms}ms。"
     
     return jsonify({
         "rects": rects,
@@ -106,9 +169,10 @@ def preview_crops():
         "log": log_msg
     })
 
-def _collect_cropped_items(session_id, files):
+def _collect_cropped_items(session_id, files, naming_template=None, ext="jpg"):
     """从会话原图按 rects 提取裁剪结果。返回 (folder, name, img) 列表。"""
     all_cropped_items = []
+    ext_clean = ext.lower().lstrip(".")
 
     for f in files:
         file_id = f.get("file_id")
@@ -137,22 +201,27 @@ def _collect_cropped_items(session_id, files):
         scale_x = orig_w / prev_w
         scale_y = orig_h / prev_h
 
-        for idx, r in enumerate(rects):
+        crop_idx = 0
+        for r in rects:
+            if r.get("excluded"):
+                continue
             cropped = ImageCropper.extract_crop(
                 original_img, r, scale_x, scale_y, auto_rotate=auto_rotate, bg_type=bg_type
             )
             if cropped is None or cropped.size == 0:
                 continue
-            all_cropped_items.append((name_prefix, f"crop_{idx+1:02d}.png", cropped))
+            crop_idx += 1
+            out_name = ImageCropper.format_crop_name(
+                naming_template, filename, crop_idx, ext=ext_clean
+            )
+            all_cropped_items.append((name_prefix, out_name, cropped))
 
     return all_cropped_items
-
 
 def _export_entry_path(folder, name, flat=False):
     if flat:
         return f"{folder}_{name}"
     return f"{folder}/{name}"
-
 
 @app.route('/api/export', methods=['POST'])
 def export_crops():
@@ -160,21 +229,33 @@ def export_crops():
     session_id = data.get("session_id")
     files = data.get("files", [])
     export_type = data.get("export_type", "zip")
+    export_format = (data.get("format") or "jpg").lower().lstrip(".")
+    naming_template = data.get("naming_template") or "{original}_crop_{index:02d}"
+    quality = int(data.get("quality", 100))
     flat = bool(data.get("flat", False))
 
     if not session_id:
         return jsonify({"error": "缺少 session_id"}), 400
 
-    all_cropped_items = _collect_cropped_items(session_id, files)
+    all_cropped_items = _collect_cropped_items(
+        session_id, files, naming_template=naming_template, ext=export_format
+    )
 
     if not all_cropped_items:
         return jsonify({"error": "没有提取到任何裁剪后的图片，请调整裁剪参数。"}), 400
 
-    # 供前端按文件逐步拉取并本地打包，避免下载管理器劫持二进制响应
+    encode_ext = f".{export_format}"
+    encode_params = []
+    if export_format in ["jpg", "jpeg"]:
+        encode_params = [cv2.IMWRITE_JPEG_QUALITY, quality]
+    elif export_format == "png":
+        encode_params = [cv2.IMWRITE_PNG_COMPRESSION, 3]
+
+    # 供前端按文件逐步拉取并本地打包
     if export_type == "images":
         images = []
         for folder, name, img in all_cropped_items:
-            ok, buffer = cv2.imencode('.png', img)
+            ok, buffer = cv2.imencode(encode_ext, img, encode_params)
             if not ok:
                 continue
             images.append({
@@ -192,15 +273,15 @@ def export_crops():
         zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
             for folder, name, img in all_cropped_items:
-                _, buffer = cv2.imencode('.png', img)
-                zf.writestr(_export_entry_path(folder, name, flat=flat), buffer.tobytes())
+                ok, buffer = cv2.imencode(encode_ext, img, encode_params)
+                if ok:
+                    zf.writestr(_export_entry_path(folder, name, flat=flat), buffer.tobytes())
         zip_bytes = zip_buffer.getvalue()
-        # 不使用 as_attachment，避免 IDM 等下载器劫持 Content-Disposition: attachment
         return send_file(
             BytesIO(zip_bytes),
             mimetype='application/zip',
             as_attachment=False,
-            download_name='cropped_batch_images.zip',
+            download_name=f'cropped_batch_{export_format}.zip',
         )
 
     if export_type == "local":
@@ -214,12 +295,12 @@ def export_crops():
                 target_folder = os.path.join(local_out_dir, folder)
                 os.makedirs(target_folder, exist_ok=True)
                 out_path = os.path.join(target_folder, name)
-            if not ImageCropper.imwrite(out_path, img):
+            if not ImageCropper.imwrite(out_path, img, quality=quality):
                 return jsonify({"error": f"写入失败: {out_path}"}), 500
 
         abs_out_path = os.path.abspath(local_out_dir)
         return jsonify({
-            "message": f"成功批量分割并导出 {len(all_cropped_items)} 张照片。",
+            "message": f"成功批量分割并导出 {len(all_cropped_items)} 张照片（{export_format.upper()} 格式）。",
             "local_path": abs_out_path,
             "count": len(all_cropped_items),
         })

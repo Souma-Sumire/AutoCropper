@@ -1,6 +1,6 @@
 // 状态管理
 let sessionId = null;
-let filesMap = {}; // { fileId: { name, width, height, thumbnail, rects, params, canvasEl, containerEl, detected, selectedCropIndex } }
+let filesMap = {}; // { fileId: { name, width, height, thumbnail, rects, params, canvasEl, containerEl, detected, selectedCropIndex, selectedCropIndices: Set<number>, _edgeCanvas, _edgeCtx } }
 let currentFileId = null;
 let currentDebugMode = 'original'; // 'original' | 'threshold' | 'blurred'
 let debounceTimeout = null;
@@ -14,6 +14,8 @@ const fileMeta = document.getElementById('fileMeta');
 const fileListContainer = document.getElementById('fileListContainer');
 const canvasContainer = document.getElementById('canvasContainer');
 const exportTypeSelect = document.getElementById('exportType');
+const exportFormatSelect = document.getElementById('exportFormat');
+const namingTemplateInput = document.getElementById('namingTemplate');
 const flatExportCheck = document.getElementById('flatExport');
 const exportBtn = document.getElementById('exportBtn');
 const syncParamsBtn = document.getElementById('syncParamsBtn');
@@ -35,6 +37,8 @@ function setExportBusy(busy, label) {
     exportBtn.disabled = busy || isImporting || Object.keys(filesMap).length === 0;
     exportBtn.textContent = busy ? (label || '正在导出…') : '开始执行图像裁剪';
     exportTypeSelect.disabled = busy || isImporting;
+    if (exportFormatSelect) exportFormatSelect.disabled = busy || isImporting;
+    if (namingTemplateInput) namingTemplateInput.disabled = busy || isImporting;
     if (flatExportCheck) flatExportCheck.disabled = busy || isImporting;
 }
 
@@ -209,7 +213,6 @@ tabItems.forEach(tab => {
         log(`切换调试视图到: ${tab.innerText}`);
 
         Object.keys(filesMap).forEach(fileId => {
-            // 调试层需要重新取图；原图模式若已检测则只重绘
             if (currentDebugMode === 'original' && filesMap[fileId].detected) {
                 drawCanvas(fileId);
                 renderCropPreviews(fileId);
@@ -279,7 +282,7 @@ async function handleFiles(files) {
                     <div class="crop-preview-panel">
                         <div class="crop-preview-title">
                             <span>矫正预览</span>
-                            <span class="hint">选中后：Z 左旋90° · C 右旋90° · X 转180°</span>
+                            <span class="hint">快捷键：Z 左旋 · C 右旋 · X 转180°/反选排除 · Shift多选</span>
                         </div>
                         <div class="crop-preview-strip" id="crop-previews-${fileId}"></div>
                     </div>
@@ -295,6 +298,17 @@ async function handleFiles(files) {
                             <label><input type="radio" name="bgType-${fileId}" value="light" checked> 浅色白底</label>
                             <label><input type="radio" name="bgType-${fileId}" value="dark"> 深色黑底</label>
                         </div>
+                    </div>
+
+                    <div class="ctrl-group">
+                        <div class="ctrl-label-row">
+                            <span>二值化算法模式 <span style="cursor:help;color:var(--accent-color);font-weight:bold;" title="固定阈值：手动拉动阈值滑块；&#10;Otsu 大津法：自动根据灰度双峰计算最优全局阈值；&#10;自适应局部高斯：有效应对纸张发黄、四角光照不均或暗角。">[?]</span></span>
+                        </div>
+                        <select id="threshMode-${fileId}" style="width:100%;font-size:11px;background:var(--bg-primary);color:var(--text-main);border:1px solid var(--border-color);padding:3px;outline:none;">
+                            <option value="fixed" selected>固定阈值 (手动精确调整)</option>
+                            <option value="otsu">Otsu 大津法 (自动双峰计算)</option>
+                            <option value="adaptive">自适应局部高斯 (抗发黄/不均光照)</option>
+                        </select>
                     </div>
 
                     <div class="ctrl-group">
@@ -315,12 +329,24 @@ async function handleFiles(files) {
 
                     <div class="ctrl-group">
                         <div class="ctrl-label-row">
-                            <span>二值化阈值 <span style="cursor:help;color:var(--accent-color);font-weight:bold;" title="区分背景与前景的亮度临界点（0-255）。调高可滤除浅灰色阴影，使边缘彻底分离。">[?]</span></span>
+                            <span>二值化阈值 / 灵敏度 <span style="cursor:help;color:var(--accent-color);font-weight:bold;" title="区分背景与前景的亮度临界点。调高可滤除浅灰色阴影，使边缘彻底分离。">[?]</span></span>
                             <span id="threshValLabel-${fileId}" style="font-family:monospace; font-weight:bold; color:var(--accent-color);">200</span>
                         </div>
-                        <div class="ctrl-input-row" style="display:flex; gap:10px; align-items:center;">
+                        <div class="ctrl-input-row" style="display:flex; gap:6px; align-items:center;">
                             <input type="range" id="threshold-${fileId}" min="0" max="255" value="200" style="flex:1; cursor:pointer;">
-                            <input type="number" id="thresholdNum-${fileId}" min="0" max="255" value="200" style="width:45px; background:var(--bg-primary); color:var(--text-main); border:1px solid var(--border-color); font-size:11px; text-align:right; padding:2px;">
+                            <input type="number" id="thresholdNum-${fileId}" min="0" max="255" value="200" style="width:42px; background:var(--bg-primary); color:var(--text-main); border:1px solid var(--border-color); font-size:11px; text-align:right; padding:2px;">
+                            <button id="estimateThreshBtn-${fileId}" class="btn-mini" style="font-size:10px; padding:3px 5px;" title="根据图像灰度自动估算最佳阈值">估算</button>
+                        </div>
+                    </div>
+
+                    <div class="ctrl-group">
+                        <div class="ctrl-label-row">
+                            <span>形态学平滑 (闭合缝隙) <span style="cursor:help;color:var(--accent-color);font-weight:bold;" title="闭合轻微裂痕与微小缝隙，平滑老照片边缘毛刺。0 为不启用。">[?]</span></span>
+                            <span id="morphValLabel-${fileId}" style="font-family:monospace; font-weight:bold; color:var(--accent-color);">0 px</span>
+                        </div>
+                        <div class="ctrl-input-row" style="display:flex; gap:10px; align-items:center;">
+                            <input type="range" id="morphSizeRange-${fileId}" min="0" max="15" value="0" style="flex:1; cursor:pointer;">
+                            <input type="number" id="morphSizeNum-${fileId}" min="0" max="15" value="0" style="width:45px; background:var(--bg-primary); color:var(--text-main); border:1px solid var(--border-color); font-size:11px; text-align:right; padding:2px;">
                         </div>
                     </div>
 
@@ -369,9 +395,28 @@ async function handleFiles(files) {
                         </div>
                     </div>
 
-                    <div style="display:flex; gap:6px; margin-top:8px;">
-                        <button id="delCropBtn-${fileId}" class="btn-secondary" style="margin-top:0; font-size:11px; padding:4px;" title="删除当前选中的裁剪框 (快捷键: Delete / Backspace)">删除选中框</button>
-                        <button id="reDetectBtn-${fileId}" class="btn-secondary" style="margin-top:0; font-size:11px; padding:4px;" title="使用当前调优参数重新自动检测">重新自动检测</button>
+                    <div class="ctrl-group" style="margin-top:10px;">
+                        <div class="ctrl-label-row">
+                            <span>选框高级操作 (已选中: <span id="multiCount-${fileId}" style="color:var(--accent-color);font-weight:bold;">1</span> 个)</span>
+                        </div>
+                        <div class="tool-btn-grid full-width" style="margin-top:4px;">
+                            <button id="autoOrientBtn-${fileId}" class="btn-mini" style="border-color:var(--accent-color); color:var(--accent-color); font-weight:bold;" title="基于人脸与图像特征智能判断朝向并摆正">自动纠正所有朝向</button>
+                        </div>
+                        <div class="tool-btn-grid" style="margin-top:4px;">
+                            <button id="mergeCropsBtn-${fileId}" class="btn-mini" title="将当前选中的多个框合并为一个大框 (快捷键: M)">合并多框 (M)</button>
+                            <button id="selectAllBtn-${fileId}" class="btn-mini" title="全选当前图片的所有裁剪框 (快捷键: Ctrl+A)">全选框 (Ctrl+A)</button>
+                        </div>
+                        <div class="tool-btn-grid" style="margin-top:4px;">
+                            <button id="splitVCropBtn-${fileId}" class="btn-mini" title="将当前选中框从中间左右垂直二等分 (快捷键: V)">垂直拆分 (V)</button>
+                            <button id="splitHCropBtn-${fileId}" class="btn-mini" title="将当前选中框从中间上下水平二等分 (快捷键: H)">水平拆分 (H)</button>
+                        </div>
+                        <div class="tool-btn-grid" style="margin-top:4px;">
+                            <button id="delCropBtn-${fileId}" class="btn-mini" style="color:#ff3b30;" title="删除所有选中的裁剪框 (快捷键: Delete / Backspace)">删除选中框</button>
+                            <button id="reDetectBtn-${fileId}" class="btn-mini" title="使用当前调优参数重新自动检测">重新自动检测</button>
+                        </div>
+                        <div style="font-size:10px; color:var(--text-muted); margin-top:6px; line-height:1.4;">
+                            提示: 拖动已开启物理边缘磁吸（按住 Ctrl 自由拖动）；按住 Shift 可在空白处拉框多选或连续加选。
+                        </div>
                     </div>
                 </div>
             `;
@@ -391,9 +436,12 @@ async function handleFiles(files) {
                     redoStack: [],
                     detected: false,
                     selectedCropIndex: 0,
+                    selectedCropIndices: new Set([0]),
                     params: {
                         blur_kernel: 3,
                         threshold: 200,
+                        threshold_mode: 'fixed',
+                        morph_size: 0,
                         bg_type: 'light',
                         min_area_pct: 0.8,
                         max_area_pct: 80.0,
@@ -402,7 +450,9 @@ async function handleFiles(files) {
                     },
                     canvasEl: canvasEl,
                     containerEl: pageEl,
-                    debugImgSrc: null
+                    debugImgSrc: null,
+                    _edgeCanvas: null,
+                    _edgeCtx: null
                 };
 
                 bindLocalEvents(fileId);
@@ -411,7 +461,6 @@ async function handleFiles(files) {
                 setupCanvasObserver();
                 updateBatchSummary();
 
-                // 导入阶段只后台检测，不切换选中，避免中途乱跳
                 await silentRequestPreview(fileId);
             } catch (err) {
                 log(`上传接口通信异常: ${err}`);
@@ -439,9 +488,14 @@ async function handleFiles(files) {
 function bindLocalEvents(fileId) {
     const fileData = filesMap[fileId];
 
+    const threshModeSelect = document.getElementById(`threshMode-${fileId}`);
     const threshRange = document.getElementById(`threshold-${fileId}`);
     const threshNum = document.getElementById(`thresholdNum-${fileId}`);
     const threshLabel = document.getElementById(`threshValLabel-${fileId}`);
+    const estimateBtn = document.getElementById(`estimateThreshBtn-${fileId}`);
+    const morphRange = document.getElementById(`morphSizeRange-${fileId}`);
+    const morphNum = document.getElementById(`morphSizeNum-${fileId}`);
+    const morphLabel = document.getElementById(`morphValLabel-${fileId}`);
     const paddingRange = document.getElementById(`padding-${fileId}`);
     const paddingNum = document.getElementById(`paddingNum-${fileId}`);
     const paddingLabel = document.getElementById(`paddingValLabel-${fileId}`);
@@ -454,6 +508,12 @@ function bindLocalEvents(fileId) {
     const maxAreaInput = document.getElementById(`maxArea-${fileId}`);
     const maxAreaLabel = document.getElementById(`maxAreaValLabel-${fileId}`);
     const bgRadios = document.getElementsByName(`bgType-${fileId}`);
+
+    const autoOrientBtn = document.getElementById(`autoOrientBtn-${fileId}`);
+    const mergeCropsBtn = document.getElementById(`mergeCropsBtn-${fileId}`);
+    const selectAllBtn = document.getElementById(`selectAllBtn-${fileId}`);
+    const splitVCropBtn = document.getElementById(`splitVCropBtn-${fileId}`);
+    const splitHCropBtn = document.getElementById(`splitHCropBtn-${fileId}`);
     const delCropBtn = document.getElementById(`delCropBtn-${fileId}`);
     const reDetectBtn = document.getElementById(`reDetectBtn-${fileId}`);
 
@@ -464,6 +524,72 @@ function bindLocalEvents(fileId) {
             requestPreview(fileId, skipPreviews);
         }, 16);
     };
+
+    if (threshModeSelect) {
+        threshModeSelect.addEventListener('change', (e) => {
+            fileData.params.threshold_mode = e.target.value;
+            log(`[${fileData.name}] 切换二值化模式: ${e.target.options[e.target.selectedIndex].text}`);
+            requestPreview(fileId, false);
+        });
+    }
+
+    if (estimateBtn) {
+        estimateBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+                estimateBtn.disabled = true;
+                estimateBtn.innerText = '…';
+                const res = await fetch('/api/estimate_threshold', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        file_id: fileId,
+                        bg_type: fileData.params.bg_type
+                    })
+                });
+                const data = await res.json();
+                if (data.threshold !== undefined) {
+                    fileData.params.threshold = data.threshold;
+                    threshRange.value = data.threshold;
+                    threshNum.value = data.threshold;
+                    threshLabel.innerText = data.threshold;
+                    log(`[${fileData.name}] 大津法估算最佳阈值: ${data.threshold}`);
+                    requestPreview(fileId, false);
+                }
+            } catch (err) {
+                log(`估算阈值异常: ${err}`);
+            } finally {
+                estimateBtn.disabled = false;
+                estimateBtn.innerText = '估算';
+            }
+        });
+    }
+
+    if (morphRange) {
+        morphRange.addEventListener('input', (e) => {
+            const val = parseInt(e.target.value) || 0;
+            morphNum.value = val;
+            morphLabel.innerText = val + ' px';
+            fileData.params.morph_size = val;
+            triggerFastPreview(true);
+        });
+        morphRange.addEventListener('change', (e) => {
+            fileData.params.morph_size = parseInt(e.target.value) || 0;
+            requestPreview(fileId, false);
+        });
+        morphNum.addEventListener('input', (e) => {
+            const val = Math.max(0, Math.min(15, parseInt(e.target.value) || 0));
+            morphRange.value = val;
+            morphLabel.innerText = val + ' px';
+            fileData.params.morph_size = val;
+            triggerFastPreview(true);
+        });
+        morphNum.addEventListener('change', (e) => {
+            fileData.params.morph_size = Math.max(0, Math.min(15, parseInt(e.target.value) || 0));
+            requestPreview(fileId, false);
+        });
+    }
 
     threshRange.addEventListener('input', (e) => {
         threshNum.value = e.target.value;
@@ -586,6 +712,36 @@ function bindLocalEvents(fileId) {
         });
     });
 
+    if (autoOrientBtn) {
+        autoOrientBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            autoOrientAllCrops(fileId);
+        });
+    }
+    if (mergeCropsBtn) {
+        mergeCropsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            mergeSelectedCrops(fileId);
+        });
+    }
+    if (selectAllBtn) {
+        selectAllBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            selectAllCrops(fileId);
+        });
+    }
+    if (splitVCropBtn) {
+        splitVCropBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            splitSelectedCrop(fileId, 'v');
+        });
+    }
+    if (splitHCropBtn) {
+        splitHCropBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            splitSelectedCrop(fileId, 'h');
+        });
+    }
     if (delCropBtn) {
         delCropBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -599,7 +755,6 @@ function bindLocalEvents(fileId) {
         });
     }
 
-    // Canvas 自由变换与框选交互
     const canvasEl = fileData.canvasEl;
     canvasEl.addEventListener('mousedown', (e) => handleCanvasMouseDown(fileId, e));
     canvasEl.addEventListener('mousemove', (e) => handleCanvasMouseMove(fileId, e));
@@ -725,7 +880,6 @@ function selectFile(fileId, autoScroll = true) {
         }, 500);
     }
 
-    // 已检测过的文件切换选中时不再重新跑检测
     if (!fileData.detected) {
         requestPreview(fileId);
     } else if (currentDebugMode !== 'original') {
@@ -740,11 +894,13 @@ function mergeRectsPreserveFlip(oldRects, newRects) {
     return (newRects || []).map((rect, idx) => {
         const prev = oldRects && oldRects[idx];
         let orient = 0;
+        let excluded = false;
         if (prev) {
             if (typeof prev.orient === 'number') orient = ((prev.orient % 360) + 360) % 360;
             else if (prev.flip180) orient = 180;
+            if (prev.excluded !== undefined) excluded = !!prev.excluded;
         }
-        return { ...rect, orient };
+        return { ...rect, orient, excluded };
     });
 }
 
@@ -755,7 +911,6 @@ function requestPreview(fileId, skipCropPreviews = false) {
     const fileData = filesMap[targetId];
     if (!fileData) return;
 
-    // 取消尚未完成的前序请求，保证高频滑动不发生网络拥堵与回跳
     if (fileData._previewAbort) {
         fileData._previewAbort.abort();
     }
@@ -778,7 +933,6 @@ function requestPreview(fileId, skipCropPreviews = false) {
     })
     .then(res => res.json())
     .then(data => {
-        // 如果在此请求返回前已发起了更新的请求，直接丢弃过时结果
         if (reqSeq !== fileData._previewSeq) return;
 
         if (data.error) {
@@ -788,8 +942,13 @@ function requestPreview(fileId, skipCropPreviews = false) {
         fileData.rects = mergeRectsPreserveFlip(fileData.rects, data.rects);
         fileData.debugImgSrc = data.debug_image;
         fileData.detected = true;
-        if (fileData.selectedCropIndex >= fileData.rects.length) {
-            fileData.selectedCropIndex = Math.max(0, fileData.rects.length - 1);
+
+        if (!fileData.selectedCropIndices) {
+            fileData.selectedCropIndices = new Set();
+        }
+        if (fileData.rects.length > 0 && fileData.selectedCropIndices.size === 0) {
+            fileData.selectedCropIndices.add(0);
+            fileData.selectedCropIndex = 0;
         }
 
         const validCount = (fileData.rects || []).filter(r => !r.excluded).length;
@@ -805,7 +964,6 @@ function requestPreview(fileId, skipCropPreviews = false) {
         updateBatchSummary();
         drawCanvas(targetId);
 
-        // 拖动过程中跳过开销巨大的缩略图切片生成，松开后或普通模式再生成
         if (!skipCropPreviews) {
             renderCropPreviews(targetId);
         }
@@ -837,6 +995,8 @@ function silentRequestPreview(fileId) {
             fileData.rects = mergeRectsPreserveFlip(fileData.rects, data.rects);
             fileData.debugImgSrc = null;
             fileData.detected = true;
+            fileData.selectedCropIndices = new Set(data.rects.length > 0 ? [0] : []);
+            fileData.selectedCropIndex = data.rects.length > 0 ? 0 : -1;
 
             const badge = document.getElementById(`badge-${fileId}`);
             if (badge) badge.innerText = data.rects.length;
@@ -852,7 +1012,6 @@ function silentRequestPreview(fileId) {
     });
 }
 
-/** 从预览缩略图生成矫正后的子图预览（与导出逻辑一致，含额外朝向旋转） */
 function buildCropPreviewDataUrl(sourceImg, rect, autoRotate, bgType) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
@@ -876,7 +1035,6 @@ function buildCropPreviewDataUrl(sourceImg, rect, autoRotate, bgType) {
         canvas.height = outH;
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, outW, outH);
-        // OpenCV 正角为逆时针，Canvas 正角为顺时针
         ctx.translate(outW / 2, outH / 2);
         ctx.rotate((-angle * Math.PI) / 180);
         ctx.drawImage(sourceImg, -cx, -cy);
@@ -934,16 +1092,24 @@ function renderCropPreviews(fileId) {
         return;
     }
 
+    const multiCountEl = document.getElementById(`multiCount-${fileId}`);
+    if (multiCountEl) {
+        multiCountEl.innerText = (fileData.selectedCropIndices ? fileData.selectedCropIndices.size : 0);
+    }
+
     const img = new Image();
     img.onload = () => {
         strip.innerHTML = '';
         const autoRotate = !!fileData.params.auto_rotate;
+        const selIndices = fileData.selectedCropIndices || new Set();
+
         rects.forEach((rect, index) => {
+            const isSelected = selIndices.has(index);
             const isExcluded = !!rect.excluded;
             const orient = getRectOrient(rect);
             const orientLabel = formatOrientLabel(orient);
             const item = document.createElement('div');
-            item.className = 'crop-preview-item' + (index === fileData.selectedCropIndex ? ' selected' : '') + (isExcluded ? ' excluded' : '');
+            item.className = 'crop-preview-item' + (isSelected ? ' selected' : '') + (isExcluded ? ' excluded' : '');
             const src = buildCropPreviewDataUrl(img, rect, autoRotate, fileData.params.bg_type);
             const badgeHtml = isExcluded
                 ? `<span class="flip-badge" style="background:#ff3b30;color:#fff;">排除</span>`
@@ -955,7 +1121,7 @@ function renderCropPreviews(fileId) {
             `;
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
-                selectCrop(fileId, index);
+                selectCrop(fileId, index, e.shiftKey || e.ctrlKey || e.metaKey);
             });
             strip.appendChild(item);
         });
@@ -963,11 +1129,29 @@ function renderCropPreviews(fileId) {
     img.src = fileData.thumbnail;
 }
 
-function selectCrop(fileId, index) {
+function selectCrop(fileId, index, isMulti = false) {
     const fileData = filesMap[fileId];
     if (!fileData || !fileData.rects[index]) return;
     selectFile(fileId, false);
-    fileData.selectedCropIndex = index;
+
+    if (!fileData.selectedCropIndices) fileData.selectedCropIndices = new Set();
+
+    if (isMulti) {
+        if (fileData.selectedCropIndices.has(index)) {
+            fileData.selectedCropIndices.delete(index);
+        } else {
+            fileData.selectedCropIndices.add(index);
+        }
+        fileData.selectedCropIndex = index;
+    } else {
+        fileData.selectedCropIndices.clear();
+        fileData.selectedCropIndices.add(index);
+        fileData.selectedCropIndex = index;
+    }
+
+    const multiCountEl = document.getElementById(`multiCount-${fileId}`);
+    if (multiCountEl) multiCountEl.innerText = fileData.selectedCropIndices.size;
+
     drawCanvas(fileId);
     renderCropPreviews(fileId);
 }
@@ -979,7 +1163,8 @@ function createSnapshot(fileId) {
     if (!fileData) return null;
     return {
         rects: JSON.parse(JSON.stringify(fileData.rects || [])),
-        selectedCropIndex: fileData.selectedCropIndex
+        selectedCropIndex: fileData.selectedCropIndex,
+        selectedCropIndices: Array.from(fileData.selectedCropIndices || [])
     };
 }
 
@@ -1012,7 +1197,8 @@ function undo(fileId) {
 
     const prevState = fileData.undoStack.pop();
     fileData.rects = JSON.parse(JSON.stringify(prevState.rects));
-    fileData.selectedCropIndex = Math.max(0, Math.min(prevState.selectedCropIndex, fileData.rects.length - 1));
+    fileData.selectedCropIndex = prevState.selectedCropIndex;
+    fileData.selectedCropIndices = new Set(prevState.selectedCropIndices || [prevState.selectedCropIndex]);
 
     updateFileUiAfterRectsChange(targetId);
     log(`[${fileData.name}] 撤销操作 (Ctrl+Z)`);
@@ -1033,7 +1219,8 @@ function redo(fileId) {
 
     const nextState = fileData.redoStack.pop();
     fileData.rects = JSON.parse(JSON.stringify(nextState.rects));
-    fileData.selectedCropIndex = Math.max(0, Math.min(nextState.selectedCropIndex, fileData.rects.length - 1));
+    fileData.selectedCropIndex = nextState.selectedCropIndex;
+    fileData.selectedCropIndices = new Set(nextState.selectedCropIndices || [nextState.selectedCropIndex]);
 
     updateFileUiAfterRectsChange(targetId);
     log(`[${fileData.name}] 重做操作 (Ctrl+Y)`);
@@ -1052,11 +1239,17 @@ function updateFileUiAfterRectsChange(fileId) {
         headerCount.innerText = `已提取: ${validCount} 张${totalCount > validCount ? ` (含 ${totalCount - validCount} 个排除区)` : ''}`;
     }
 
+    const multiCountEl = document.getElementById(`multiCount-${fileId}`);
+    if (multiCountEl) {
+        multiCountEl.innerText = fileData.selectedCropIndices ? fileData.selectedCropIndices.size : 0;
+    }
+
     updateBatchSummary();
     drawCanvas(fileId);
     renderCropPreviews(fileId);
 }
 
+// 批量旋转选中框
 function rotateSelectedCrop(deltaDeg) {
     if (!currentFileId || !filesMap[currentFileId]) return;
     const fileData = filesMap[currentFileId];
@@ -1065,21 +1258,255 @@ function rotateSelectedCrop(deltaDeg) {
 
     pushUndoState(currentFileId);
 
-    let idx = fileData.selectedCropIndex;
-    if (idx == null || idx < 0 || idx >= rects.length) idx = 0;
-    fileData.selectedCropIndex = idx;
-    const rect = rects[idx];
-    const cur = getRectOrient(rect);
-    rect.orient = (cur + deltaDeg + 360) % 360;
-    delete rect.flip180;
+    const selIndices = (fileData.selectedCropIndices && fileData.selectedCropIndices.size > 0)
+        ? Array.from(fileData.selectedCropIndices)
+        : [fileData.selectedCropIndex >= 0 ? fileData.selectedCropIndex : 0];
+
+    selIndices.forEach(idx => {
+        if (rects[idx]) {
+            const cur = getRectOrient(rects[idx]);
+            rects[idx].orient = (cur + deltaDeg + 360) % 360;
+            delete rects[idx].flip180;
+        }
+    });
+
     drawCanvas(currentFileId);
     renderCropPreviews(currentFileId);
+    log(`[${fileData.name}] 已旋转选中的 ${selIndices.length} 个裁剪框 (${deltaDeg > 0 ? '+' : ''}${deltaDeg}°)。`);
+}
+
+// 批量删除选中的框
+function deleteSelectedCrop(fileId) {
+    const targetId = fileId || currentFileId;
+    if (!targetId || !filesMap[targetId]) return;
+    const fileData = filesMap[targetId];
+    const rects = fileData.rects || [];
+    if (rects.length === 0) return;
+
+    const selIndices = fileData.selectedCropIndices && fileData.selectedCropIndices.size > 0
+        ? Array.from(fileData.selectedCropIndices)
+        : [fileData.selectedCropIndex];
+
+    const validIndices = selIndices.filter(i => i >= 0 && i < rects.length).sort((a, b) => b - a);
+    if (validIndices.length === 0) return;
+
+    pushUndoState(targetId);
+
+    validIndices.forEach(idx => {
+        rects.splice(idx, 1);
+    });
+
+    fileData.selectedCropIndices.clear();
+    if (rects.length > 0) {
+        fileData.selectedCropIndex = Math.min(validIndices[validIndices.length - 1], rects.length - 1);
+        fileData.selectedCropIndices.add(fileData.selectedCropIndex);
+    } else {
+        fileData.selectedCropIndex = -1;
+    }
+
+    updateFileUiAfterRectsChange(targetId);
+    log(`[${fileData.name}] 已批量删除 ${validIndices.length} 个裁剪框，当前剩余 ${rects.length} 张。`);
+}
+
+// 全选当前图片的所有框
+function selectAllCrops(fileId) {
+    const targetId = fileId || currentFileId;
+    if (!targetId || !filesMap[targetId]) return;
+    const fileData = filesMap[targetId];
+    const rects = fileData.rects || [];
+
+    if (!fileData.selectedCropIndices) fileData.selectedCropIndices = new Set();
+    fileData.selectedCropIndices.clear();
+
+    rects.forEach((_, idx) => fileData.selectedCropIndices.add(idx));
+    fileData.selectedCropIndex = rects.length > 0 ? 0 : -1;
+
+    updateFileUiAfterRectsChange(targetId);
+    log(`[${fileData.name}] 已全选当前图片的所有 ${rects.length} 个选框。`);
+}
+
+// 合并当前选中的多个框为一个整体外接框
+function mergeSelectedCrops(fileId) {
+    const targetId = fileId || currentFileId;
+    if (!targetId || !filesMap[targetId]) return;
+    const fileData = filesMap[targetId];
+    const rects = fileData.rects || [];
+
+    const selIndices = Array.from(fileData.selectedCropIndices || []).sort((a, b) => a - b);
+    if (selIndices.length < 2) {
+        log(`[${fileData.name}] 请按住 Shift 选择至少 2 个框后再执行合并。`);
+        return;
+    }
+
+    pushUndoState(targetId);
+
+    const targetRects = selIndices.map(i => rects[i]);
+    let allPoints = [];
+    targetRects.forEach(r => {
+        const hInfo = getTransformHandles(r);
+        allPoints.push(...hInfo.corners);
+    });
+
+    const xs = allPoints.map(p => p[0]);
+    const ys = allPoints.map(p => p[1]);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const w = maxX - minX;
+    const h = maxY - minY;
+
+    const mergedRect = {
+        x: Math.round(minX),
+        y: Math.round(minY),
+        w: Math.round(w),
+        h: Math.round(h),
+        orient: 0,
+        excluded: false,
+        rotated: {
+            cx: Math.round(cx),
+            cy: Math.round(cy),
+            w: Math.round(w),
+            h: Math.round(h),
+            angle: 0,
+            points: computeBoxPoints(cx, cy, w, h, 0)
+        }
+    };
+
+    // 移除原有被合并的框（从大索引到小索引删除）
+    for (let i = selIndices.length - 1; i >= 0; i--) {
+        rects.splice(selIndices[i], 1);
+    }
+
+    rects.push(mergedRect);
+    fileData.selectedCropIndices.clear();
+    fileData.selectedCropIndex = rects.length - 1;
+    fileData.selectedCropIndices.add(fileData.selectedCropIndex);
+
+    updateFileUiAfterRectsChange(targetId);
+    log(`[${fileData.name}] 成功将 ${selIndices.length} 个框合并为一个新裁剪框。`);
+}
+
+// 拆分当前选中的框 (垂直/水平)
+function splitSelectedCrop(fileId, direction) {
+    const targetId = fileId || currentFileId;
+    if (!targetId || !filesMap[targetId]) return;
+    const fileData = filesMap[targetId];
+    const rects = fileData.rects || [];
+
+    const idx = fileData.selectedCropIndex;
+    if (idx < 0 || idx >= rects.length) return;
+
+    pushUndoState(targetId);
+
+    const targetRect = rects[idx];
+    const hInfo = getTransformHandles(targetRect);
+
+    let r1, r2;
+    if (direction === 'h') {
+        const halfH = hInfo.h / 2;
+        const dy = halfH / 2;
+        const rad = (hInfo.angle * Math.PI) / 180;
+        const dx = Math.sin(rad) * dy;
+        const dy_rot = -Math.cos(rad) * dy;
+
+        const c1 = { cx: hInfo.cx - dx, cy: hInfo.cy - dy_rot, w: hInfo.w, h: halfH, angle: hInfo.angle };
+        const c2 = { cx: hInfo.cx + dx, cy: hInfo.cy + dy_rot, w: hInfo.w, h: halfH, angle: hInfo.angle };
+
+        r1 = { ...targetRect, rotated: { ...c1, points: computeBoxPoints(c1.cx, c1.cy, c1.w, c1.h, c1.angle) } };
+        r2 = { ...targetRect, rotated: { ...c2, points: computeBoxPoints(c2.cx, c2.cy, c2.w, c2.h, c2.angle) } };
+    } else {
+        const halfW = hInfo.w / 2;
+        const dx = halfW / 2;
+        const rad = (hInfo.angle * Math.PI) / 180;
+        const dx_rot = Math.cos(rad) * dx;
+        const dy_rot = Math.sin(rad) * dx;
+
+        const c1 = { cx: hInfo.cx - dx_rot, cy: hInfo.cy - dy_rot, w: halfW, h: hInfo.h, angle: hInfo.angle };
+        const c2 = { cx: hInfo.cx + dx_rot, cy: hInfo.cy + dy_rot, w: halfW, h: hInfo.h, angle: hInfo.angle };
+
+        r1 = { ...targetRect, rotated: { ...c1, points: computeBoxPoints(c1.cx, c1.cy, c1.w, c1.h, c1.angle) } };
+        r2 = { ...targetRect, rotated: { ...c2, points: computeBoxPoints(c2.cx, c2.cy, c2.w, c2.h, c2.angle) } };
+    }
+
+    updateRectBoundingBox(r1);
+    updateRectBoundingBox(r2);
+
+    rects.splice(idx, 1, r1, r2);
+    fileData.selectedCropIndices.clear();
+    fileData.selectedCropIndex = idx;
+    fileData.selectedCropIndices.add(idx);
+    fileData.selectedCropIndices.add(idx + 1);
+
+    updateFileUiAfterRectsChange(targetId);
+    log(`[${fileData.name}] 已将 #${idx + 1} 框${direction === 'v' ? '垂直左右' : '水平上下'}二等分拆分。`);
+}
+
+function updateRectBoundingBox(rect) {
+    if (!rect.rotated || !rect.rotated.points) return;
+    const xs = rect.rotated.points.map(p => p[0]);
+    const ys = rect.rotated.points.map(p => p[1]);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    rect.x = Math.max(0, Math.round(minX));
+    rect.y = Math.max(0, Math.round(minY));
+    rect.w = Math.round(maxX - minX);
+    rect.h = Math.round(maxY - minY);
+}
+
+// 智能预判所有朝向并自动修正
+async function autoOrientAllCrops(fileId) {
+    const targetId = fileId || currentFileId;
+    if (!targetId || !filesMap[targetId]) return;
+    const fileData = filesMap[targetId];
+    const rects = fileData.rects || [];
+    if (rects.length === 0) return;
+
+    const orientBtn = document.getElementById(`autoOrientBtn-${targetId}`);
+    if (orientBtn) {
+        orientBtn.disabled = true;
+        orientBtn.innerText = '正在智能分析朝向…';
+    }
+
+    try {
+        pushUndoState(targetId);
+        const res = await fetch('/api/auto_orient', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                file_id: targetId,
+                rects: fileData.rects,
+                bg_type: fileData.params.bg_type,
+                auto_rotate: fileData.params.auto_rotate
+            })
+        });
+
+        const data = await res.json();
+        if (data.rects) {
+            fileData.rects = data.rects;
+            updateFileUiAfterRectsChange(targetId);
+            log(`[${fileData.name}] ${data.message || '朝向智能预判校正完成。'}`);
+        }
+    } catch (err) {
+        log(`智能朝向预判异常: ${err}`);
+    } finally {
+        if (orientBtn) {
+            orientBtn.disabled = false;
+            orientBtn.innerText = '自动纠正所有朝向';
+        }
+    }
 }
 
 // 自由变换与手动操作状态管理器
 let transformState = {
     fileId: null,
-    mode: 'none', // 'none' | 'moving' | 'resizing' | 'rotating' | 'drawing_new'
+    mode: 'none', // 'none' | 'moving' | 'resizing' | 'rotating' | 'drawing_new' | 'marquee_select'
     handleIndex: -1,
     startX: 0,
     startY: 0,
@@ -1087,6 +1514,7 @@ let transformState = {
     currentY: 0,
     rectIndex: -1,
     initialHandles: null,
+    initialMultiRects: null, // 多选时记录每个框的初始中心和角度
     pendingSnapshot: null,
     hasModified: false
 };
@@ -1099,7 +1527,12 @@ function computeBoxPoints(cx, cy, w, h, angle) {
     const p1 = [cx + a * h - b * w, cy - b * h - a * w];
     const p2 = [2 * cx - p0[0], 2 * cy - p0[1]];
     const p3 = [2 * cx - p1[0], 2 * cy - p1[1]];
-    return [p0, p1, p2, p3];
+    return [
+        [Math.round(p0[0]), Math.round(p0[1])],
+        [Math.round(p1[0]), Math.round(p1[1])],
+        [Math.round(p2[0]), Math.round(p2[1])],
+        [Math.round(p3[0]), Math.round(p3[1])]
+    ];
 }
 
 function getTransformHandles(rect) {
@@ -1120,7 +1553,6 @@ function getTransformHandles(rect) {
     const angle = rot.angle || 0;
     const [p0, p1, p2, p3] = rot.points;
 
-    // 8 个手柄：4 个角点 + 4 个边中点
     const m01 = [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
     const m12 = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2];
     const m23 = [(p2[0] + p3[0]) / 2, (p2[1] + p3[1]) / 2];
@@ -1169,6 +1601,89 @@ function getCanvasCoords(canvas, e) {
     };
 }
 
+// 边缘智能磁吸算法：在当前坐标 10px 范围内搜寻最大梯度物理边缘（按住 Ctrl 临时禁用）
+function getEdgeSnap(fileId, x, y, isCtrlPressed) {
+    if (isCtrlPressed) {
+        return { x, y, snapped: false };
+    }
+
+    const fileData = filesMap[fileId];
+    if (!fileData || !fileData._cachedImg) {
+        return { x, y, snapped: false };
+    }
+
+    if (!fileData._edgeCanvas) {
+        fileData._edgeCanvas = document.createElement('canvas');
+        fileData._edgeCanvas.width = fileData._cachedImg.width;
+        fileData._edgeCanvas.height = fileData._cachedImg.height;
+        fileData._edgeCtx = fileData._edgeCanvas.getContext('2d', { willReadFrequently: true });
+        fileData._edgeCtx.drawImage(fileData._cachedImg, 0, 0);
+    }
+
+    const ctx = fileData._edgeCtx;
+    const searchR = 9;
+    const sx = Math.max(1, Math.min(fileData._cachedImg.width - searchR * 2 - 2, Math.round(x - searchR)));
+    const sy = Math.max(1, Math.min(fileData._cachedImg.height - searchR * 2 - 2, Math.round(y - searchR)));
+    const sw = searchR * 2 + 1;
+    const sh = searchR * 2 + 1;
+
+    try {
+        const imgData = ctx.getImageData(sx, sy, sw, sh);
+        const data = imgData.data;
+
+        let maxGradX = 0;
+        let bestOffsetGx = 0;
+        let maxGradY = 0;
+        let bestOffsetGy = 0;
+
+        const centerY = searchR;
+        const centerX = searchR;
+
+        // 水平梯度搜索
+        for (let i = 1; i < sw - 1; i++) {
+            const idxLeft = (centerY * sw + (i - 1)) * 4;
+            const idxRight = (centerY * sw + (i + 1)) * 4;
+            const grayL = data[idxLeft] * 0.299 + data[idxLeft + 1] * 0.587 + data[idxLeft + 2] * 0.114;
+            const grayR = data[idxRight] * 0.299 + data[idxRight + 1] * 0.587 + data[idxRight + 2] * 0.114;
+            const grad = Math.abs(grayR - grayL);
+            if (grad > maxGradX) {
+                maxGradX = grad;
+                bestOffsetGx = i - centerX;
+            }
+        }
+
+        // 垂直梯度搜索
+        for (let j = 1; j < sh - 1; j++) {
+            const idxTop = ((j - 1) * sw + centerX) * 4;
+            const idxBot = ((j + 1) * sw + centerX) * 4;
+            const grayT = data[idxTop] * 0.299 + data[idxTop + 1] * 0.587 + data[idxTop + 2] * 0.114;
+            const grayB = data[idxBot] * 0.299 + data[idxBot + 1] * 0.587 + data[idxBot + 2] * 0.114;
+            const grad = Math.abs(grayB - grayT);
+            if (grad > maxGradY) {
+                maxGradY = grad;
+                bestOffsetGy = j - centerY;
+            }
+        }
+
+        let snappedX = x;
+        let snappedY = y;
+        let isSnapped = false;
+
+        if (maxGradX > 30 && Math.abs(bestOffsetGx) <= 8) {
+            snappedX = x + bestOffsetGx;
+            isSnapped = true;
+        }
+        if (maxGradY > 30 && Math.abs(bestOffsetGy) <= 8) {
+            snappedY = y + bestOffsetGy;
+            isSnapped = true;
+        }
+
+        return { x: snappedX, y: snappedY, snapped: isSnapped };
+    } catch (_) {
+        return { x, y, snapped: false };
+    }
+}
+
 const ROTATE_CURSORS = {};
 [0, 45, 90, 135, 180, 225, 270, 315].forEach(ang => {
     const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><g transform='rotate(${ang} 10 10)'><path d='M 14.4 4.8 A 6.8 6.8 0 0 1 14.4 15.2' fill='none' stroke='%23ffffff' stroke-width='3.2' stroke-linecap='round'/><polygon points='11.5,2.4 15.8,3.1 13.0,6.5' fill='%23ffffff' stroke='%23ffffff' stroke-width='1.5' stroke-linejoin='round'/><polygon points='11.5,17.6 15.8,16.9 13.0,13.5' fill='%23ffffff' stroke='%23ffffff' stroke-width='1.5' stroke-linejoin='round'/><path d='M 14.4 4.8 A 6.8 6.8 0 0 1 14.4 15.2' fill='none' stroke='%23000000' stroke-width='1.4' stroke-linecap='round'/><polygon points='11.5,2.4 15.8,3.1 13.0,6.5' fill='%23000000'/><polygon points='11.5,17.6 15.8,16.9 13.0,13.5' fill='%23000000'/></g></svg>`;
@@ -1202,7 +1717,7 @@ function hitTest(fileId, mx, my) {
         const selRect = rects[selIdx];
         const hInfo = getTransformHandles(selRect);
 
-        // 1. 优先检查 8 个控制手柄 (缩放)
+        // 1. 优先检查主选框的 8 个控制手柄
         for (let i = 0; i < 8; i++) {
             const hp = hInfo.handles[i];
             const dist = Math.hypot(mx - hp[0], my - hp[1]);
@@ -1211,7 +1726,6 @@ function hitTest(fileId, mx, my) {
             }
         }
 
-        // 计算当前鼠标在选中矩形局部坐标系中的坐标 (中心为 0,0)
         const dx = mx - hInfo.cx;
         const dy = my - hInfo.cy;
         const lx = dx * hInfo.u_w[0] + dy * hInfo.u_w[1];
@@ -1224,7 +1738,6 @@ function hitTest(fileId, mx, my) {
             return { type: 'inside', info: hInfo, rectIndex: selIdx };
         }
 
-        // 2. 检查矩形外围附近区域 (Photoshop 自由变换：鼠标位于矩形外围边框/角点附近即可旋转)
         const distOutsideX = Math.max(0, Math.abs(lx) - halfW);
         const distOutsideY = Math.max(0, Math.abs(ly) - halfH);
         const distToBox = Math.hypot(distOutsideX, distOutsideY);
@@ -1234,7 +1747,7 @@ function hitTest(fileId, mx, my) {
         }
     }
 
-    // 3. 检查是否点击了其它矩形
+    // 2. 检查是否点击了其它矩形（逆序优先选上层）
     for (let idx = rects.length - 1; idx >= 0; idx--) {
         if (idx === selIdx) continue;
         const rInfo = getTransformHandles(rects[idx]);
@@ -1272,24 +1785,6 @@ function getHandleCursor(info, handleIndex) {
     return 'ew-resize';
 }
 
-function deleteSelectedCrop(fileId) {
-    const targetId = fileId || currentFileId;
-    if (!targetId || !filesMap[targetId]) return;
-    const fileData = filesMap[targetId];
-    const rects = fileData.rects || [];
-    if (rects.length === 0) return;
-
-    pushUndoState(targetId);
-
-    let idx = fileData.selectedCropIndex;
-    if (idx < 0 || idx >= rects.length) idx = 0;
-    rects.splice(idx, 1);
-    fileData.selectedCropIndex = Math.max(0, Math.min(idx, rects.length - 1));
-
-    updateFileUiAfterRectsChange(targetId);
-    log(`[${fileData.name}] 已删除第 #${idx + 1} 裁剪框，当前剩余 ${rects.length} 张。`);
-}
-
 function handleCanvasMouseDown(fileId, e) {
     if (e.button !== 0) return;
     selectFile(fileId, false);
@@ -1302,26 +1797,12 @@ function handleCanvasMouseDown(fileId, e) {
     const pendingSnapshot = createSnapshot(fileId);
 
     const isCtrl = e.ctrlKey || e.metaKey;
+    const isShift = e.shiftKey;
     const isAlt = e.altKey;
 
-    // 1. Ctrl+左键：强制新建普通裁剪框
-    if (isCtrl) {
-        e.preventDefault();
-        transformState = {
-            fileId,
-            mode: 'drawing_new',
-            drawType: 'include',
-            startX: x,
-            startY: y,
-            currentX: x,
-            currentY: y,
-            pendingSnapshot,
-            hasModified: false
-        };
-        return;
-    }
+    if (!fileData.selectedCropIndices) fileData.selectedCropIndices = new Set();
 
-    // 2. Alt+左键：强制新建排除区域
+    // 1. Alt+左键：新建排除区域
     if (isAlt) {
         e.preventDefault();
         transformState = {
@@ -1338,7 +1819,7 @@ function handleCanvasMouseDown(fileId, e) {
         return;
     }
 
-    // 3. 常规左键交互
+    // 2. 普通/Shift 交互
     if (hit.type === 'handle') {
         e.preventDefault();
         transformState = {
@@ -1364,54 +1845,85 @@ function handleCanvasMouseDown(fileId, e) {
             pendingSnapshot,
             hasModified: false
         };
-    } else if (hit.type === 'inside') {
+    } else if (hit.type === 'inside' || hit.type === 'other_rect') {
         e.preventDefault();
-        transformState = {
-            fileId,
-            mode: 'moving',
-            startX: x,
-            startY: y,
-            rectIndex: hit.rectIndex,
-            initialHandles: hit.info,
-            pendingSnapshot,
-            hasModified: false
-        };
-    } else if (hit.type === 'other_rect') {
-        e.preventDefault();
-        fileData.selectedCropIndex = hit.rectIndex;
+        const clickedIdx = hit.rectIndex;
+
+        if (isShift) {
+            if (fileData.selectedCropIndices.has(clickedIdx)) {
+                fileData.selectedCropIndices.delete(clickedIdx);
+                const remaining = Array.from(fileData.selectedCropIndices);
+                fileData.selectedCropIndex = remaining.length > 0 ? remaining[remaining.length - 1] : -1;
+            } else {
+                fileData.selectedCropIndices.add(clickedIdx);
+                fileData.selectedCropIndex = clickedIdx;
+            }
+        } else {
+            if (!fileData.selectedCropIndices.has(clickedIdx)) {
+                fileData.selectedCropIndices.clear();
+                fileData.selectedCropIndices.add(clickedIdx);
+                fileData.selectedCropIndex = clickedIdx;
+            }
+        }
+
         drawCanvas(fileId);
         renderCropPreviews(fileId);
-        const newHandles = getTransformHandles(fileData.rects[hit.rectIndex]);
+
+        // 记录所有当前多选矩形的初始位置，以便支持批量整体平移
+        const initialMulti = {};
+        fileData.selectedCropIndices.forEach(idx => {
+            if (fileData.rects[idx]) {
+                const rInfo = getTransformHandles(fileData.rects[idx]);
+                initialMulti[idx] = { cx: rInfo.cx, cy: rInfo.cy, w: rInfo.w, h: rInfo.h, angle: rInfo.angle };
+            }
+        });
+
         transformState = {
             fileId,
             mode: 'moving',
             startX: x,
             startY: y,
-            rectIndex: hit.rectIndex,
-            initialHandles: newHandles,
+            rectIndex: fileData.selectedCropIndex,
+            initialHandles: getTransformHandles(fileData.rects[fileData.selectedCropIndex]),
+            initialMultiRects: initialMulti,
             pendingSnapshot,
             hasModified: false
         };
     } else if (hit.type === 'empty') {
-        // 普通点击空白处：取消当前选中状态，不进入绘制模式
-        if (fileData.selectedCropIndex !== -1) {
-            fileData.selectedCropIndex = -1;
-            drawCanvas(fileId);
-            renderCropPreviews(fileId);
+        if (isShift) {
+            // Shift + 空白处拖动：矩形框选多选 (Marquee Selection)
+            e.preventDefault();
+            transformState = {
+                fileId,
+                mode: 'marquee_select',
+                startX: x,
+                startY: y,
+                currentX: x,
+                currentY: y,
+                pendingSnapshot,
+                hasModified: false
+            };
+        } else {
+            // 普通点击空白处：清空选择
+            if (fileData.selectedCropIndices.size > 0) {
+                fileData.selectedCropIndices.clear();
+                fileData.selectedCropIndex = -1;
+                drawCanvas(fileId);
+                renderCropPreviews(fileId);
+            }
+            // 允许直接在空白处拖动拉出新选框
+            transformState = {
+                fileId,
+                mode: 'drawing_new',
+                drawType: 'include',
+                startX: x,
+                startY: y,
+                currentX: x,
+                currentY: y,
+                pendingSnapshot,
+                hasModified: false
+            };
         }
-        transformState = {
-            fileId,
-            mode: 'none',
-            handleIndex: -1,
-            startX: 0,
-            startY: 0,
-            currentX: 0,
-            currentY: 0,
-            rectIndex: -1,
-            initialHandles: null,
-            pendingSnapshot: null,
-            hasModified: false
-        };
     }
 }
 
@@ -1423,16 +1935,14 @@ function handleCanvasMouseMove(fileId, e) {
 
     if (transformState.mode === 'none') {
         const hit = hitTest(fileId, x, y);
-        if (e.ctrlKey || e.metaKey || e.altKey) {
+        if (e.altKey) {
             canvas.style.cursor = 'crosshair';
         } else if (hit.type === 'handle') {
             canvas.style.cursor = getHandleCursor(hit.info, hit.index);
         } else if (hit.type === 'rotate') {
             canvas.style.cursor = getRotateCursor(hit.cx, hit.cy, x, y);
-        } else if (hit.type === 'inside') {
+        } else if (hit.type === 'inside' || hit.type === 'other_rect') {
             canvas.style.cursor = 'move';
-        } else if (hit.type === 'other_rect') {
-            canvas.style.cursor = 'pointer';
         } else {
             canvas.style.cursor = 'default';
         }
@@ -1455,23 +1965,48 @@ window.addEventListener('mousemove', (e) => {
     if (!fileData) return;
 
     const canvas = fileData.canvasEl;
-    const { x, y } = getCanvasCoords(canvas, e);
+    let { x, y } = getCanvasCoords(canvas, e);
+
+    const isCtrlPressed = e.ctrlKey || e.metaKey;
 
     if (transformState.mode === 'moving') {
         canvas.style.cursor = 'move';
-        const dx = x - transformState.startX;
-        const dy = y - transformState.startY;
-        const init = transformState.initialHandles;
-        const rect = fileData.rects[transformState.rectIndex];
-        if (rect) {
-            updateRectFromParams(rect, init.cx + dx, init.cy + dy, init.w, init.h, init.angle);
-            transformState.hasModified = true;
-            drawCanvas(fileId);
+        // 磁吸判断
+        const snapped = getEdgeSnap(fileId, x, y, isCtrlPressed);
+        const curX = snapped.x;
+        const curY = snapped.y;
+
+        const dx = curX - transformState.startX;
+        const dy = curY - transformState.startY;
+
+        if (transformState.initialMultiRects) {
+            Object.keys(transformState.initialMultiRects).forEach(idxStr => {
+                const idx = parseInt(idxStr);
+                const rect = fileData.rects[idx];
+                const init = transformState.initialMultiRects[idx];
+                if (rect && init) {
+                    updateRectFromParams(rect, init.cx + dx, init.cy + dy, init.w, init.h, init.angle);
+                }
+            });
+        } else {
+            const init = transformState.initialHandles;
+            const rect = fileData.rects[transformState.rectIndex];
+            if (rect && init) {
+                updateRectFromParams(rect, init.cx + dx, init.cy + dy, init.w, init.h, init.angle);
+            }
         }
+
+        transformState.hasModified = true;
+        drawCanvas(fileId);
     } else if (transformState.mode === 'resizing') {
         canvas.style.cursor = getHandleCursor(transformState.initialHandles, transformState.handleIndex);
-        const dx = x - transformState.startX;
-        const dy = y - transformState.startY;
+
+        const snapped = getEdgeSnap(fileId, x, y, isCtrlPressed);
+        const curX = snapped.x;
+        const curY = snapped.y;
+
+        const dx = curX - transformState.startX;
+        const dy = curY - transformState.startY;
         const init = transformState.initialHandles;
         const rect = fileData.rects[transformState.rectIndex];
         if (rect) {
@@ -1486,62 +2021,54 @@ window.addEventListener('mousemove', (e) => {
             let new_cx = init.cx;
             let new_cy = init.cy;
 
-            if (hIdx === 2) { // 右下角 (+w/2, +h/2)
+            if (hIdx === 2) {
                 new_w = Math.max(15, init.w + proj_w);
                 new_h = Math.max(15, init.h + proj_h);
-                if (e.shiftKey) {
-                    new_h = Math.max(15, new_w * (init.h / init.w));
-                }
+                if (e.shiftKey) new_h = Math.max(15, new_w * (init.h / init.w));
                 delta_w = new_w - init.w;
                 delta_h = new_h - init.h;
                 new_cx = init.cx + (delta_w * init.u_w[0] + delta_h * init.u_h[0]) * 0.5;
                 new_cy = init.cy + (delta_w * init.u_w[1] + delta_h * init.u_h[1]) * 0.5;
-            } else if (hIdx === 0) { // 左上角 (-w/2, -h/2)
+            } else if (hIdx === 0) {
                 new_w = Math.max(15, init.w - proj_w);
                 new_h = Math.max(15, init.h - proj_h);
-                if (e.shiftKey) {
-                    new_h = Math.max(15, new_w * (init.h / init.w));
-                }
+                if (e.shiftKey) new_h = Math.max(15, new_w * (init.h / init.w));
                 delta_w = new_w - init.w;
                 delta_h = new_h - init.h;
                 new_cx = init.cx - (delta_w * init.u_w[0] + delta_h * init.u_h[0]) * 0.5;
                 new_cy = init.cy - (delta_w * init.u_w[1] + delta_h * init.u_h[1]) * 0.5;
-            } else if (hIdx === 1) { // 左下角 (-w/2, +h/2)
+            } else if (hIdx === 1) {
                 new_w = Math.max(15, init.w - proj_w);
                 new_h = Math.max(15, init.h + proj_h);
-                if (e.shiftKey) {
-                    new_h = Math.max(15, new_w * (init.h / init.w));
-                }
+                if (e.shiftKey) new_h = Math.max(15, new_w * (init.h / init.w));
                 delta_w = new_w - init.w;
                 delta_h = new_h - init.h;
                 new_cx = init.cx + (-delta_w * init.u_w[0] + delta_h * init.u_h[0]) * 0.5;
                 new_cy = init.cy + (-delta_w * init.u_w[1] + delta_h * init.u_h[1]) * 0.5;
-            } else if (hIdx === 3) { // 右上角 (+w/2, -h/2)
+            } else if (hIdx === 3) {
                 new_w = Math.max(15, init.w + proj_w);
                 new_h = Math.max(15, init.h - proj_h);
-                if (e.shiftKey) {
-                    new_h = Math.max(15, new_w * (init.h / init.w));
-                }
+                if (e.shiftKey) new_h = Math.max(15, new_w * (init.h / init.w));
                 delta_w = new_w - init.w;
                 delta_h = new_h - init.h;
                 new_cx = init.cx + (delta_w * init.u_w[0] - delta_h * init.u_h[0]) * 0.5;
                 new_cy = init.cy + (delta_w * init.u_w[1] - delta_h * init.u_h[1]) * 0.5;
-            } else if (hIdx === 4) { // 左边中点
+            } else if (hIdx === 4) {
                 new_w = Math.max(15, init.w - proj_w);
                 delta_w = new_w - init.w;
                 new_cx = init.cx - (delta_w * init.u_w[0]) * 0.5;
                 new_cy = init.cy - (delta_w * init.u_w[1]) * 0.5;
-            } else if (hIdx === 5) { // 上边中点
+            } else if (hIdx === 5) {
                 new_h = Math.max(15, init.h + proj_h);
                 delta_h = new_h - init.h;
                 new_cx = init.cx + (delta_h * init.u_h[0]) * 0.5;
                 new_cy = init.cy + (delta_h * init.u_h[1]) * 0.5;
-            } else if (hIdx === 6) { // 右边中点
+            } else if (hIdx === 6) {
                 new_w = Math.max(15, init.w + proj_w);
                 delta_w = new_w - init.w;
                 new_cx = init.cx + (delta_w * init.u_w[0]) * 0.5;
                 new_cy = init.cy + (delta_w * init.u_w[1]) * 0.5;
-            } else if (hIdx === 7) { // 下边中点
+            } else if (hIdx === 7) {
                 new_h = Math.max(15, init.h - proj_h);
                 delta_h = new_h - init.h;
                 new_cx = init.cx - (delta_h * init.u_h[0]) * 0.5;
@@ -1566,7 +2093,7 @@ window.addEventListener('mousemove', (e) => {
             transformState.hasModified = true;
             drawCanvas(fileId);
         }
-    } else if (transformState.mode === 'drawing_new') {
+    } else if (transformState.mode === 'drawing_new' || transformState.mode === 'marquee_select') {
         canvas.style.cursor = 'crosshair';
         transformState.currentX = x;
         transformState.currentY = y;
@@ -1579,7 +2106,33 @@ window.addEventListener('mouseup', (e) => {
     const fileId = transformState.fileId;
     const fileData = filesMap[fileId];
 
-    if (transformState.mode === 'drawing_new') {
+    if (transformState.mode === 'marquee_select') {
+        const x0 = Math.min(transformState.startX, transformState.currentX);
+        const y0 = Math.min(transformState.startY, transformState.currentY);
+        const w0 = Math.abs(transformState.currentX - transformState.startX);
+        const h0 = Math.abs(transformState.currentY - transformState.startY);
+
+        if (w0 >= 10 && h0 >= 10) {
+            if (!fileData.selectedCropIndices) fileData.selectedCropIndices = new Set();
+            (fileData.rects || []).forEach((r, idx) => {
+                const rx = r.x;
+                const ry = r.y;
+                const rw = r.w;
+                const rh = r.h;
+                const intersects = !(rx + rw < x0 || rx > x0 + w0 || ry + rh < y0 || ry > y0 + h0);
+                if (intersects) {
+                    fileData.selectedCropIndices.add(idx);
+                }
+            });
+            if (fileData.selectedCropIndices.size > 0) {
+                fileData.selectedCropIndex = Array.from(fileData.selectedCropIndices)[0];
+            }
+            updateFileUiAfterRectsChange(fileId);
+            log(`[${fileData.name}] 矩形多选完成，当前选中 ${fileData.selectedCropIndices.size} 个裁剪框。`);
+        } else {
+            drawCanvas(fileId);
+        }
+    } else if (transformState.mode === 'drawing_new') {
         const canvas = fileData.canvasEl;
         const { x, y } = getCanvasCoords(canvas, e);
         const x0 = Math.min(transformState.startX, x);
@@ -1607,6 +2160,9 @@ window.addEventListener('mouseup', (e) => {
             };
             fileData.rects.push(newRect);
             fileData.selectedCropIndex = fileData.rects.length - 1;
+            if (!fileData.selectedCropIndices) fileData.selectedCropIndices = new Set();
+            fileData.selectedCropIndices.clear();
+            fileData.selectedCropIndices.add(fileData.selectedCropIndex);
 
             updateFileUiAfterRectsChange(fileId);
             log(`[${fileData.name}] ${isExclude ? '新建排除区域' : '手动新建框选'} #${fileData.rects.length} (${Math.round(w0)}x${Math.round(h0)})`);
@@ -1632,6 +2188,13 @@ window.addEventListener('keydown', (e) => {
     const isCtrl = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
 
+    // 全选 Ctrl+A
+    if (isCtrl && key === 'a') {
+        e.preventDefault();
+        selectAllCrops(currentFileId);
+        return;
+    }
+
     // 撤销 Ctrl+Z
     if (isCtrl && key === 'z') {
         e.preventDefault();
@@ -1650,34 +2213,47 @@ window.addEventListener('keydown', (e) => {
         return;
     }
 
-    // 非组合键快捷操作
+    // 快捷操作
     if (!isCtrl) {
         if (key === 'z') {
             e.preventDefault();
-            rotateSelectedCrop(-90); // 向左（逆时针）90°
+            rotateSelectedCrop(-90);
         } else if (key === 'c') {
             e.preventDefault();
-            rotateSelectedCrop(90); // 向右（顺时针）90°
+            rotateSelectedCrop(90);
+        } else if (key === 'm') {
+            e.preventDefault();
+            mergeSelectedCrops(currentFileId);
+        } else if (key === 'v') {
+            e.preventDefault();
+            splitSelectedCrop(currentFileId, 'v');
+        } else if (key === 'h') {
+            e.preventDefault();
+            splitSelectedCrop(currentFileId, 'h');
         } else if (key === 'x') {
             e.preventDefault();
             const fileData = filesMap[currentFileId];
             const rects = fileData ? fileData.rects || [] : [];
-            const idx = fileData ? fileData.selectedCropIndex : -1;
-            const curRect = (idx >= 0 && idx < rects.length) ? rects[idx] : null;
+            const selIndices = fileData && fileData.selectedCropIndices && fileData.selectedCropIndices.size > 0
+                ? Array.from(fileData.selectedCropIndices)
+                : [fileData ? fileData.selectedCropIndex : -1];
 
-            if (curRect && curRect.excluded) {
-                pushUndoState(currentFileId);
-                curRect.excluded = false;
-                updateFileUiAfterRectsChange(currentFileId);
-                log(`[${fileData.name}] 排除区域 #${idx + 1} 已反向为正常裁剪框`);
-            } else if (e.altKey && curRect) {
-                pushUndoState(currentFileId);
-                curRect.excluded = !curRect.excluded;
-                updateFileUiAfterRectsChange(currentFileId);
-                log(`[${fileData.name}] 选框 #${idx + 1} 已切换为${curRect.excluded ? '排除区域' : '正常裁剪框'}`);
-            } else if (curRect) {
-                rotateSelectedCrop(180);
-            }
+            pushUndoState(currentFileId);
+            selIndices.forEach(idx => {
+                const curRect = rects[idx];
+                if (curRect) {
+                    if (curRect.excluded) {
+                        curRect.excluded = false;
+                    } else if (e.altKey) {
+                        curRect.excluded = !curRect.excluded;
+                    } else {
+                        const cur = getRectOrient(curRect);
+                        curRect.orient = (cur + 180) % 360;
+                        delete curRect.flip180;
+                    }
+                }
+            });
+            updateFileUiAfterRectsChange(currentFileId);
         } else if (e.key === 'Delete' || e.key === 'Backspace') {
             e.preventDefault();
             deleteSelectedCrop(currentFileId);
@@ -1712,6 +2288,7 @@ function drawCanvas(fileId) {
         if (currentDebugMode === 'original') {
             const strokeColor = getComputedStyle(document.body).getPropertyValue('--crop-outline').trim() || '#ffff00';
             const selectedColor = '#00e5ff';
+            const multiSelectColor = '#29b6f6';
             const rects = fileData.rects || [];
 
             const calculatedLineWidth = Math.max(2, Math.round(canvas.width / 350));
@@ -1719,12 +2296,21 @@ function drawCanvas(fileId) {
             const paddingOffset = Math.round(fontSize * 0.25);
             const handlePx = Math.max(8, Math.min(22, Math.round(canvas.width / 140)));
 
+            const selIndices = fileData.selectedCropIndices || new Set();
+
             rects.forEach((rect, index) => {
-                const isSelected = index === fileData.selectedCropIndex;
+                const isSelected = selIndices.has(index);
+                const isPrimary = (index === fileData.selectedCropIndex);
                 const isExcluded = !!rect.excluded;
-                const currentStroke = isExcluded
-                    ? (isSelected ? '#ff3b30' : 'rgba(255, 59, 48, 0.85)')
-                    : (isSelected ? selectedColor : strokeColor);
+
+                let currentStroke = strokeColor;
+                if (isExcluded) {
+                    currentStroke = isSelected ? '#ff3b30' : 'rgba(255, 59, 48, 0.85)';
+                } else if (isPrimary) {
+                    currentStroke = selectedColor;
+                } else if (isSelected) {
+                    currentStroke = multiSelectColor;
+                }
 
                 canvasCtx.strokeStyle = currentStroke;
                 canvasCtx.lineWidth = calculatedLineWidth + (isSelected ? 1 : 0);
@@ -1742,6 +2328,9 @@ function drawCanvas(fileId) {
                     if (isExcluded) {
                         canvasCtx.fillStyle = 'rgba(255, 59, 48, 0.16)';
                         canvasCtx.fill();
+                    } else if (isSelected && !isPrimary) {
+                        canvasCtx.fillStyle = 'rgba(41, 182, 246, 0.1)';
+                        canvasCtx.fill();
                     }
                     canvasCtx.stroke();
 
@@ -1751,7 +2340,8 @@ function drawCanvas(fileId) {
                     const orientLabel = formatOrientLabel(getRectOrient(rect));
                     const angleStr = Math.abs(hInfo.angle) > 0.05 ? ` ${hInfo.angle > 0 ? '+' : ''}${hInfo.angle.toFixed(1)}°` : '';
                     const labelPrefix = isExcluded ? '[排除 ' : '[';
-                    const label = `${labelPrefix}#${index + 1}]${orientLabel ? ' ' + orientLabel : ''}${angleStr}`;
+                    const multiMark = (selIndices.size > 1 && isSelected) ? ' ✓' : '';
+                    const label = `${labelPrefix}#${index + 1}]${orientLabel ? ' ' + orientLabel : ''}${angleStr}${multiMark}`;
                     const textWidth = canvasCtx.measureText(label).width;
 
                     const rectH = fontSize + (paddingOffset * 2);
@@ -1764,6 +2354,9 @@ function drawCanvas(fileId) {
                     if (isExcluded) {
                         canvasCtx.fillStyle = 'rgba(255, 59, 48, 0.16)';
                         canvasCtx.fillRect(rect.x, rect.y, rect.w, rect.h);
+                    } else if (isSelected && !isPrimary) {
+                        canvasCtx.fillStyle = 'rgba(41, 182, 246, 0.1)';
+                        canvasCtx.fillRect(rect.x, rect.y, rect.w, rect.h);
                     }
                     canvasCtx.strokeRect(rect.x, rect.y, rect.w, rect.h);
 
@@ -1771,7 +2364,8 @@ function drawCanvas(fileId) {
                     canvasCtx.font = `bold ${fontSize}px monospace`;
                     const orientLabel = formatOrientLabel(getRectOrient(rect));
                     const labelPrefix = isExcluded ? '[排除 ' : '[';
-                    const label = `${labelPrefix}#${index + 1}]${orientLabel ? ' ' + orientLabel : ''}`;
+                    const multiMark = (selIndices.size > 1 && isSelected) ? ' ✓' : '';
+                    const label = `${labelPrefix}#${index + 1}]${orientLabel ? ' ' + orientLabel : ''}${multiMark}`;
                     const textWidth = canvasCtx.measureText(label).width;
 
                     const rectH = fontSize + (paddingOffset * 2);
@@ -1782,8 +2376,8 @@ function drawCanvas(fileId) {
                     canvasCtx.fillText(label, rect.x + paddingOffset, rectY + fontSize);
                 }
 
-                // 绘制 Photoshop 风格的 8 个自由变换控制手柄与中心指示点
-                if (isSelected) {
+                // 绘制主选中框的 8 个自由变换控制手柄
+                if (isPrimary) {
                     canvasCtx.fillStyle = '#ffffff';
                     canvasCtx.strokeStyle = isExcluded ? '#ff3b30' : '#007acc';
                     canvasCtx.lineWidth = 2;
@@ -1793,7 +2387,6 @@ function drawCanvas(fileId) {
                         canvasCtx.strokeRect(hp[0] - handlePx / 2, hp[1] - handlePx / 2, handlePx, handlePx);
                     });
 
-                    // 中心十字/圆点
                     canvasCtx.beginPath();
                     canvasCtx.arc(hInfo.cx, hInfo.cy, handlePx / 2.5, 0, Math.PI * 2);
                     canvasCtx.fillStyle = isExcluded ? '#ff3b30' : selectedColor;
@@ -1802,22 +2395,33 @@ function drawCanvas(fileId) {
                 }
             });
 
-            // 正在绘制新选框时显示虚线框
-            if (transformState && transformState.mode === 'drawing_new' && transformState.fileId === fileId) {
+            // 正在绘制新选框或矩形框选时显示虚线
+            if (transformState && transformState.fileId === fileId) {
                 const x0 = Math.min(transformState.startX, transformState.currentX);
                 const y0 = Math.min(transformState.startY, transformState.currentY);
                 const w0 = Math.abs(transformState.currentX - transformState.startX);
                 const h0 = Math.abs(transformState.currentY - transformState.startY);
 
-                const isExcludeDraw = transformState.drawType === 'exclude';
-                canvasCtx.save();
-                canvasCtx.strokeStyle = isExcludeDraw ? '#ff3b30' : '#00e5ff';
-                canvasCtx.lineWidth = calculatedLineWidth;
-                canvasCtx.setLineDash([8, 6]);
-                canvasCtx.strokeRect(x0, y0, w0, h0);
-                canvasCtx.fillStyle = isExcludeDraw ? 'rgba(255, 59, 48, 0.22)' : 'rgba(0, 229, 255, 0.15)';
-                canvasCtx.fillRect(x0, y0, w0, h0);
-                canvasCtx.restore();
+                if (transformState.mode === 'marquee_select') {
+                    canvasCtx.save();
+                    canvasCtx.strokeStyle = '#29b6f6';
+                    canvasCtx.lineWidth = 1.5;
+                    canvasCtx.setLineDash([4, 4]);
+                    canvasCtx.strokeRect(x0, y0, w0, h0);
+                    canvasCtx.fillStyle = 'rgba(41, 182, 246, 0.15)';
+                    canvasCtx.fillRect(x0, y0, w0, h0);
+                    canvasCtx.restore();
+                } else if (transformState.mode === 'drawing_new') {
+                    const isExcludeDraw = transformState.drawType === 'exclude';
+                    canvasCtx.save();
+                    canvasCtx.strokeStyle = isExcludeDraw ? '#ff3b30' : '#00e5ff';
+                    canvasCtx.lineWidth = calculatedLineWidth;
+                    canvasCtx.setLineDash([8, 6]);
+                    canvasCtx.strokeRect(x0, y0, w0, h0);
+                    canvasCtx.fillStyle = isExcludeDraw ? 'rgba(255, 59, 48, 0.22)' : 'rgba(0, 229, 255, 0.15)';
+                    canvasCtx.fillRect(x0, y0, w0, h0);
+                    canvasCtx.restore();
+                }
             }
         }
     };
@@ -1844,6 +2448,16 @@ syncParamsBtn.addEventListener('click', () => {
         if (fileId === currentFileId) return;
 
         filesMap[fileId].params = { ...srcParams };
+
+        const modeSelect = document.getElementById(`threshMode-${fileId}`);
+        if (modeSelect) modeSelect.value = srcParams.threshold_mode || 'fixed';
+
+        const morphRange = document.getElementById(`morphSizeRange-${fileId}`);
+        if (morphRange) morphRange.value = srcParams.morph_size || 0;
+        const morphNum = document.getElementById(`morphSizeNum-${fileId}`);
+        if (morphNum) morphNum.value = srcParams.morph_size || 0;
+        const morphLabel = document.getElementById(`morphValLabel-${fileId}`);
+        if (morphLabel) morphLabel.innerText = (srcParams.morph_size || 0) + ' px';
 
         document.getElementById(`threshold-${fileId}`).value = srcParams.threshold;
         document.getElementById(`thresholdNum-${fileId}`).value = srcParams.threshold;
@@ -1879,7 +2493,10 @@ exportBtn.addEventListener('click', async () => {
     if (!sessionId || Object.keys(filesMap).length === 0) return;
 
     const exportType = exportTypeSelect.value;
+    const exportFormat = (exportFormatSelect ? exportFormatSelect.value : 'jpg').toLowerCase();
+    const namingTemplate = (namingTemplateInput && namingTemplateInput.value.trim()) ? namingTemplateInput.value.trim() : '{original}_crop_{index:02d}';
     const flat = !!(flatExportCheck && flatExportCheck.checked);
+
     const filesPayload = Object.keys(filesMap).map(fileId => ({
         file_id: fileId,
         filename: filesMap[fileId].name,
@@ -1891,7 +2508,7 @@ exportBtn.addEventListener('click', async () => {
     const totalFiles = filesPayload.length;
     const totalRects = filesPayload.reduce((n, f) => n + f.rects.length, 0);
 
-    log(`开始批量裁剪。总文件数: ${totalFiles}，子图约 ${totalRects} 张，导出目标: ${exportType}${flat ? '（平铺，无子文件夹）' : ''}`);
+    log(`开始批量裁剪。格式: ${exportFormat.toUpperCase()}，模板: ${namingTemplate}，总文件数: ${totalFiles}，子图约 ${totalRects} 张，模式: ${exportType}${flat ? ' (平铺)' : ''}`);
     setExportBusy(true, '正在导出…');
 
     try {
@@ -1914,6 +2531,9 @@ exportBtn.addEventListener('click', async () => {
                     body: JSON.stringify({
                         session_id: sessionId,
                         export_type: 'images',
+                        format: exportFormat,
+                        naming_template: namingTemplate,
+                        quality: 100,
                         flat,
                         files: [fileItem]
                     })
@@ -1944,9 +2564,9 @@ exportBtn.addEventListener('click', async () => {
             setExportBusy(true, '正在打包…');
             log(`正在浏览器内打包 ${zipEntries.length} 张图片为 ZIP…`);
             const zipBlob = buildStoreZip(zipEntries);
-            const zipName = `batch_cropped_${Date.now().toString(36)}.zip`;
+            const zipName = `batch_cropped_${exportFormat}_${Date.now().toString(36)}.zip`;
             downloadBlobNative(zipBlob, zipName);
-            log(`批量导出完成！已通过浏览器下载: ${zipName}（共 ${zipEntries.length} 张）。`);
+            log(`批量导出完成！已通过浏览器下载: ${zipName}（共 ${zipEntries.length} 张，${exportFormat.toUpperCase()} 格式）。`);
         } else {
             let savedCount = 0;
             let lastPath = '';
@@ -1966,6 +2586,9 @@ exportBtn.addEventListener('click', async () => {
                     body: JSON.stringify({
                         session_id: sessionId,
                         export_type: 'local',
+                        format: exportFormat,
+                        naming_template: namingTemplate,
+                        quality: 100,
                         flat,
                         files: [fileItem]
                     })
@@ -1983,7 +2606,7 @@ exportBtn.addEventListener('click', async () => {
                 log(`[${fileItem.filename}] ${data.message || '已写入'}`);
             }
 
-            log(`批量裁剪保存成功！共写入约 ${savedCount} 张照片。`);
+            log(`批量裁剪保存成功！共写入约 ${savedCount} 张 ${exportFormat.toUpperCase()} 照片。`);
             if (lastPath) log(`输出物理目录: ${lastPath}`);
         }
     } catch (err) {
