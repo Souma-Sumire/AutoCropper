@@ -289,6 +289,8 @@ body {
     border: 1px solid var(--border-color);
     transition: border-color 0.15s ease;
     position: relative;
+    max-height: calc(100vh - 40px);
+    box-sizing: border-box;
 }
 
 .stream-page-left {
@@ -296,6 +298,8 @@ body {
     display: flex;
     flex-direction: column;
     min-width: 0;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .stream-page-right {
@@ -306,7 +310,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    max-height: 82vh;
+    max-height: 100%;
     overflow-y: auto;
 }
 
@@ -413,15 +417,16 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
-    padding: 10px;
-    min-height: 180px;
-    flex: 1;
+    padding: 8px;
+    min-height: 0;
+    min-width: 0;
+    flex: 1 1 0;
     overflow: hidden;
 }
 
 .stream-canvas {
     max-width: 100%;
-    max-height: calc(100vh - 210px);
+    max-height: 100%;
     width: auto;
     height: auto;
     object-fit: contain;
@@ -438,6 +443,69 @@ body {
     padding: 6px 12px;
     display: flex;
     flex-direction: column;
+    flex-shrink: 0;
+    max-height: 110px;
+    overflow-y: hidden;
+}
+
+/* 导出保存位置单选交互 */
+.save-location-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.path-radio-label {
+    font-size: 12px;
+    color: var(--text-primary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    user-select: none;
+}
+
+.path-input-wrap {
+    padding-left: 20px;
+    margin-top: 2px;
+}
+
+.path-input-wrap .text-input:disabled {
+    background-color: #1a1a1a;
+    color: #666666;
+    border-color: #2e2e2e;
+    cursor: not-allowed;
+}
+
+/* 状态保存指示器与 Toast 提示 */
+.state-save-indicator {
+    font-size: 11px;
+    color: #4caf50;
+    font-family: Consolas, monospace;
+    padding: 3px 6px;
+    background-color: rgba(76, 175, 80, 0.08);
+    border: 1px solid rgba(76, 175, 80, 0.25);
+    border-radius: 2px;
+    margin-bottom: 8px;
+    user-select: none;
+}
+
+.status-toast {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #1e1e1e;
+    color: #ffffff;
+    border: 1px solid var(--accent-blue);
+    padding: 8px 18px;
+    font-size: 12px;
+    font-family: Consolas, monospace;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+    z-index: 9999;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .stream-crop-strip {

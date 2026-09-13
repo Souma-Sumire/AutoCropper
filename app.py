@@ -243,16 +243,41 @@ def _export_entry_path(folder, name, flat=False):
         return f"{folder}_{name}"
     return f"{folder}/{name}"
 
+@app.route('/api/check_session', methods=['POST'])
+def check_session():
+    data = request.get_json() or {}
+    sid = data.get("session_id")
+    if not sid or not os.path.exists(os.path.join(UPLOAD_DIR, sid)):
+        return jsonify({"valid": False})
+    return jsonify({"valid": True})
+
+@app.route('/api/get_file_preview', methods=['GET'])
+def get_file_preview():
+    session_id = request.args.get("session_id")
+    file_id = request.args.get("file_id")
+    if not session_id or not file_id:
+        return jsonify({"error": "缺少参数"}), 400
+    
+    preview_path = os.path.join(UPLOAD_DIR, session_id, file_id, "preview.png")
+    if not os.path.exists(preview_path):
+        return jsonify({"error": "预览图不存在"}), 404
+        
+    return send_file(preview_path, mimetype='image/png')
+
+
 @app.route('/api/export', methods=['POST'])
 def export_crops():
     data = request.get_json() or {}
     session_id = data.get("session_id")
     files = data.get("files", [])
-    export_type = data.get("export_type", "zip")
+    export_type = data.get("export_type", "local")
     export_format = (data.get("format") or "jpg").lower().lstrip(".")
     naming_template = data.get("naming_template") or "{original}_{index:02d}"
     quality = int(data.get("quality", 100))
     flat = bool(data.get("flat", False))
+    path_mode = data.get("path_mode", "subfolder")
+    custom_path = data.get("custom_path", "")
+    subfolder = data.get("subfolder", "output")
 
     if not session_id:
         return jsonify({"error": "缺少 session_id"}), 400
@@ -305,8 +330,18 @@ def export_crops():
         )
 
     if export_type == "local":
-        local_out_dir = os.path.join(OUTPUT_DIR, session_id)
+        if path_mode == "custom" and custom_path and custom_path.strip():
+            raw_path = custom_path.strip().strip('"').strip("'")
+            local_out_dir = os.path.abspath(raw_path)
+        else:
+            sub = subfolder.strip().strip('"').strip("'") if (subfolder and subfolder.strip()) else "output"
+            if sub.lower() in ("output", "./output", ".\\output"):
+                local_out_dir = os.path.abspath(OUTPUT_DIR)
+            else:
+                local_out_dir = os.path.abspath(os.path.join(OUTPUT_DIR, sub))
+
         os.makedirs(local_out_dir, exist_ok=True)
+
 
         for folder, name, img in all_cropped_items:
             rel_entry = _export_entry_path(folder, name, flat=flat)

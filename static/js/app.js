@@ -7,17 +7,25 @@ let isImporting = false;
 let isConsoleOpen = false;
 
 // DOM 节点 - 左侧面板
-// DOM 节点 - 左侧面板
 const fileInput = document.getElementById('fileInput');
 const uploadBtn = document.getElementById('uploadBtn');
 const clearAllBtn = document.getElementById('clearAllBtn');
 const batchSummary = document.getElementById('batchSummary');
 const fileListContainer = document.getElementById('fileListContainer');
+const stateSaveIndicator = document.getElementById('stateSaveIndicator');
+
+// 导出保存位置相关 DOM
+const exportRadioCustom = document.getElementById('exportRadioCustom');
+const exportRadioSubfolder = document.getElementById('exportRadioSubfolder');
+const exportRadioZip = document.getElementById('exportRadioZip');
+const customPathInput = document.getElementById('customPathInput');
+const subfolderInput = document.getElementById('subfolderInput');
 const exportTypeSelect = document.getElementById('exportType');
 const exportFormatSelect = document.getElementById('exportFormat');
 const namingTemplateInput = document.getElementById('namingTemplate');
 const flatExportCheck = document.getElementById('flatExport');
 const exportBtn = document.getElementById('exportBtn');
+const statusToast = document.getElementById('statusToast');
 
 // DOM 节点 - 中间视口
 const canvasViewport = document.getElementById('canvasViewport');
@@ -52,10 +60,233 @@ function log(message) {
 function setExportBusy(busy, label) {
     exportBtn.disabled = busy || isImporting || Object.keys(filesMap).length === 0;
     exportBtn.textContent = busy ? (label || '正在导出…') : '开始执行图像裁剪';
-    exportTypeSelect.disabled = busy || isImporting;
+    if (exportTypeSelect) exportTypeSelect.disabled = busy || isImporting;
+    if (exportRadioCustom) exportRadioCustom.disabled = busy || isImporting;
+    if (exportRadioSubfolder) exportRadioSubfolder.disabled = busy || isImporting;
+    if (exportRadioZip) exportRadioZip.disabled = busy || isImporting;
+    if (customPathInput && !exportRadioCustom?.checked) customPathInput.disabled = true;
+    if (subfolderInput && !exportRadioSubfolder?.checked) subfolderInput.disabled = true;
     if (exportFormatSelect) exportFormatSelect.disabled = busy || isImporting;
     if (namingTemplateInput) namingTemplateInput.disabled = busy || isImporting;
     if (flatExportCheck) flatExportCheck.disabled = busy || isImporting;
+}
+
+let toastTimer = null;
+function showToast(message, duration = 2000) {
+    if (!statusToast) return;
+    statusToast.innerText = message;
+    statusToast.style.display = 'block';
+    statusToast.style.opacity = '1';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+        statusToast.style.opacity = '0';
+        setTimeout(() => {
+            statusToast.style.display = 'none';
+        }, 200);
+    }, duration);
+}
+
+// 工作区状态持久化与路径偏好记忆
+const WORKSPACE_STORAGE_KEY = 'autocropper_saved_state_v2';
+const PATH_PREF_KEY = 'autocropper_path_pref_v1';
+
+function updateExportPathRadioUi() {
+    if (exportRadioCustom && exportRadioCustom.checked) {
+        if (customPathInput) {
+            customPathInput.disabled = false;
+        }
+        if (subfolderInput) subfolderInput.disabled = true;
+    } else if (exportRadioSubfolder && exportRadioSubfolder.checked) {
+        if (customPathInput) customPathInput.disabled = true;
+        if (subfolderInput) {
+            subfolderInput.disabled = false;
+        }
+    } else if (exportRadioZip && exportRadioZip.checked) {
+        if (customPathInput) customPathInput.disabled = true;
+        if (subfolderInput) subfolderInput.disabled = true;
+    }
+    savePathPreferences();
+}
+
+function savePathPreferences() {
+    try {
+        let mode = 'subfolder';
+        if (exportRadioCustom && exportRadioCustom.checked) mode = 'custom';
+        else if (exportRadioZip && exportRadioZip.checked) mode = 'zip';
+
+        const pref = {
+            mode,
+            customPath: customPathInput ? customPathInput.value : '',
+            subfolder: subfolderInput ? subfolderInput.value : 'output',
+            format: exportFormatSelect ? exportFormatSelect.value : 'jpg',
+            naming: namingTemplateInput ? namingTemplateInput.value : '{original}_{index:02d}',
+            flat: !!(flatExportCheck && flatExportCheck.checked)
+        };
+        localStorage.setItem(PATH_PREF_KEY, JSON.stringify(pref));
+    } catch (_) {}
+}
+
+function loadPathPreferences() {
+    try {
+        const raw = localStorage.getItem(PATH_PREF_KEY);
+        if (!raw) return;
+        const pref = JSON.parse(raw);
+        if (pref.customPath && customPathInput) customPathInput.value = pref.customPath;
+        if (pref.subfolder && subfolderInput) subfolderInput.value = pref.subfolder;
+        if (pref.format && exportFormatSelect) exportFormatSelect.value = pref.format;
+        if (pref.naming && namingTemplateInput) namingTemplateInput.value = pref.naming;
+        if (typeof pref.flat === 'boolean' && flatExportCheck) flatExportCheck.checked = pref.flat;
+
+        if (pref.mode === 'custom' && exportRadioCustom) {
+            exportRadioCustom.checked = true;
+            updateExportPathRadioUi();
+        } else if (pref.mode === 'zip' && exportRadioZip) {
+            exportRadioZip.checked = true;
+            updateExportPathRadioUi();
+        } else if (exportRadioSubfolder) {
+            exportRadioSubfolder.checked = true;
+            updateExportPathRadioUi();
+        }
+    } catch (_) {}
+}
+
+function saveWorkspaceState(isManual = false) {
+    if (isImporting) return;
+    savePathPreferences();
+
+    const fileIds = Object.keys(filesMap);
+    if (fileIds.length === 0 || !sessionId) {
+        if (isManual) showToast('当前暂无可保存的工作区数据');
+        return;
+    }
+
+    try {
+        const filesData = fileIds.map(fid => {
+            const f = filesMap[fid];
+            return {
+                fileId: fid,
+                name: f.name,
+                width: f.width,
+                height: f.height,
+                params: f.params,
+                rects: f.rects || [],
+                debugMode: f.debugMode || 'original',
+                selectedCropIndex: f.selectedCropIndex,
+                selectedCropIndices: Array.from(f.selectedCropIndices || [])
+            };
+        });
+
+        const stateObj = {
+            version: 2,
+            timestamp: Date.now(),
+            sessionId: sessionId,
+            currentFileId: currentFileId,
+            files: filesData
+        };
+
+        localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(stateObj));
+
+        if (stateSaveIndicator) {
+            const now = new Date();
+            const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+            stateSaveIndicator.innerText = `● 状态已同步 (${timeStr} · Ctrl+S)`;
+            stateSaveIndicator.style.color = '#4caf50';
+        }
+
+        if (isManual) {
+            let totalRects = 0;
+            fileIds.forEach(id => {
+                totalRects += (filesMap[id].rects || []).filter(r => !r.excluded).length;
+            });
+            showToast(`已立即保存工作状态 (${fileIds.length} 个文件 · ${totalRects} 张子图)`);
+            log(`工作状态已成功保存到本地存储 (Ctrl+S)`);
+        }
+    } catch (e) {
+        log(`保存状态异常: ${e}`);
+        if (isManual) showToast('保存状态异常，请查看控制台');
+    }
+}
+
+let autoSaveTimer = null;
+function scheduleAutoSaveState() {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => {
+        saveWorkspaceState(false);
+    }, 500);
+}
+
+async function restoreWorkspaceState() {
+    loadPathPreferences();
+
+    try {
+        const raw = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+        if (!raw) return;
+        const stateObj = JSON.parse(raw);
+        if (!stateObj || !stateObj.sessionId || !Array.isArray(stateObj.files) || stateObj.files.length === 0) {
+            return;
+        }
+
+        const checkRes = await fetch('/api/check_session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: stateObj.sessionId })
+        });
+        const checkData = await checkRes.json();
+        if (!checkData.valid) {
+            log('检测到历史工作区记录，但服务端缓存已过期，请重新添加图片。');
+            return;
+        }
+
+        sessionId = stateObj.sessionId;
+        filesMap = {};
+
+        stateObj.files.forEach(f => {
+            const fid = f.fileId;
+            filesMap[fid] = {
+                name: f.name,
+                width: f.width,
+                height: f.height,
+                thumbnail: `/api/get_file_preview?session_id=${sessionId}&file_id=${fid}`,
+                rects: f.rects || [],
+                undoStack: [],
+                redoStack: [],
+                detected: true,
+                selectedCropIndex: (f.selectedCropIndex !== undefined) ? f.selectedCropIndex : 0,
+                selectedCropIndices: new Set(f.selectedCropIndices || [0]),
+                params: f.params || {
+                    blur_kernel: 3,
+                    threshold: 180,
+                    threshold_mode: 'fixed',
+                    morph_size: 0,
+                    bg_type: 'light',
+                    min_area_pct: 0.25,
+                    max_area_pct: 80.0,
+                    padding: 5,
+                    auto_rotate: true
+                },
+                debugMode: f.debugMode || 'original',
+                _cachedImg: null,
+                _edgeCanvas: null,
+                _edgeCtx: null
+            };
+        });
+
+        currentFileId = stateObj.currentFileId && filesMap[stateObj.currentFileId]
+            ? stateObj.currentFileId
+            : Object.keys(filesMap)[0];
+
+        renderFileList();
+        updateBatchSummary();
+
+        if (currentFileId) {
+            selectFile(currentFileId, true);
+        }
+
+        showToast(`已恢复上次工作状态 (${stateObj.files.length} 个文件)`);
+        log(`已自动恢复上次工作状态 (会话: ${sessionId.slice(0, 8)}..., 文件: ${stateObj.files.length} 个)`);
+    } catch (err) {
+        log(`恢复工作状态异常: ${err}`);
+    }
 }
 
 async function readApiError(res, fallback) {
@@ -1460,6 +1691,7 @@ function updateFileUiAfterRectsChange() {
     updateBatchSummary();
     drawCanvas(currentFileId);
     renderCropPreviews(currentFileId);
+    scheduleAutoSaveState();
 }
 
 function rotateSelectedCrop(deltaDeg) {
@@ -2323,6 +2555,7 @@ window.addEventListener('mouseup', (e) => {
     } else if (transformState.mode === 'moving' || transformState.mode === 'resizing' || transformState.mode === 'rotating') {
         if (transformState.hasModified && transformState.pendingSnapshot) {
             pushUndoState(currentFileId, transformState.pendingSnapshot);
+            scheduleAutoSaveState();
         }
         renderCropPreviews(currentFileId);
     } else {
@@ -2380,12 +2613,19 @@ function navigateToSiblingFile(delta) {
 
 // 快捷键管理
 window.addEventListener('keydown', (e) => {
-    const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
-    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-
     const isCtrl = e.ctrlKey || e.metaKey;
     const key = e.key ? e.key.toLowerCase() : '';
     const code = e.code || '';
+
+    // Ctrl+S 立即手动保存工作区状态（无论焦点在哪个元素上都全局拦截）
+    if (isCtrl && (key === 's' || code === 'KeyS')) {
+        e.preventDefault();
+        saveWorkspaceState(true);
+        return;
+    }
+
+    const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
     if (isCtrl && (key === 'a' || code === 'KeyA')) {
         e.preventDefault();
@@ -2678,7 +2918,20 @@ function drawCanvas(targetFileId) {
 exportBtn.addEventListener('click', async () => {
     if (!sessionId || Object.keys(filesMap).length === 0) return;
 
-    const exportType = exportTypeSelect.value;
+    let exportMode = 'subfolder';
+    if (exportRadioCustom && exportRadioCustom.checked) exportMode = 'custom';
+    else if (exportRadioZip && exportRadioZip.checked) exportMode = 'zip';
+    else if (exportRadioSubfolder && exportRadioSubfolder.checked) exportMode = 'subfolder';
+
+    const customPath = (customPathInput && customPathInput.value.trim()) ? customPathInput.value.trim() : '';
+    const subfolder = (subfolderInput && subfolderInput.value.trim()) ? subfolderInput.value.trim() : 'output';
+
+    if (exportMode === 'custom' && !customPath) {
+        showToast('请输入有效的自定义保存绝对路径');
+        if (customPathInput) customPathInput.focus();
+        return;
+    }
+
     const exportFormat = (exportFormatSelect ? exportFormatSelect.value : 'jpg').toLowerCase();
     const namingTemplate = (namingTemplateInput && namingTemplateInput.value.trim())
         ? namingTemplateInput.value.trim()
@@ -2696,11 +2949,15 @@ exportBtn.addEventListener('click', async () => {
     const totalFiles = filesPayload.length;
     const totalRects = filesPayload.reduce((n, f) => n + f.rects.length, 0);
 
-    log(`开始批量裁剪。格式: ${exportFormat.toUpperCase()}，模板: ${namingTemplate}，总文件: ${totalFiles}，子图约 ${totalRects} 张，模式: ${exportType}${flat ? ' (平铺)' : ''}`);
+    const targetDesc = (exportMode === 'zip')
+        ? 'ZIP 压缩包'
+        : (exportMode === 'custom' ? `指定路径 [${customPath}]` : `子文件夹 [${subfolder}]`);
+
+    log(`开始批量裁剪。格式: ${exportFormat.toUpperCase()}，模板: ${namingTemplate}，总文件: ${totalFiles}，子图约 ${totalRects} 张，目标: ${targetDesc}${flat ? ' (平铺)' : ''}`);
     setExportBusy(true, '正在导出…');
 
     try {
-        if (exportType === 'zip') {
+        if (exportMode === 'zip') {
             const zipEntries = [];
             let croppedCount = 0;
 
@@ -2755,6 +3012,7 @@ exportBtn.addEventListener('click', async () => {
             const zipBlob = buildStoreZip(zipEntries);
             const zipName = `batch_cropped_${exportFormat}_${Date.now().toString(36)}.zip`;
             downloadBlobNative(zipBlob, zipName);
+            showToast(`已成功打包下载 ${zipEntries.length} 张图片 (ZIP)`);
             log(`批量导出完成！已通过浏览器下载: ${zipName}（共 ${zipEntries.length} 张，${exportFormat.toUpperCase()} 格式）。`);
         } else {
             let savedCount = 0;
@@ -2767,7 +3025,7 @@ exportBtn.addEventListener('click', async () => {
                     log(`[${i + 1}/${totalFiles}] ${fileItem.filename}: 无有效裁剪框，跳过。`);
                     continue;
                 }
-                log(`正在写入本地 [${i + 1}/${totalFiles}]: ${fileItem.filename}…`);
+                log(`正在写入目标路径 [${i + 1}/${totalFiles}]: ${fileItem.filename}…`);
 
                 const res = await fetch('/api/export', {
                     method: 'POST',
@@ -2775,6 +3033,9 @@ exportBtn.addEventListener('click', async () => {
                     body: JSON.stringify({
                         session_id: sessionId,
                         export_type: 'local',
+                        path_mode: exportMode,
+                        custom_path: customPath,
+                        subfolder: subfolder,
                         format: exportFormat,
                         naming_template: namingTemplate,
                         quality: 100,
@@ -2795,12 +3056,40 @@ exportBtn.addEventListener('click', async () => {
                 log(`[${fileItem.filename}] ${data.message || '已写入'}`);
             }
 
+            showToast(`批量裁剪保存成功！共写入 ${savedCount} 张图片`, 3000);
             log(`批量裁剪保存成功！共写入约 ${savedCount} 张 ${exportFormat.toUpperCase()} 照片。`);
             if (lastPath) log(`输出物理目录: ${lastPath}`);
         }
     } catch (err) {
+        showToast(`导出出错: ${err.message || err}`, 3000);
         log(`导出出错: ${err.message || err}`);
     } finally {
         setExportBusy(false);
     }
 });
+
+// 导出单选框与偏好项事件绑定
+[exportRadioCustom, exportRadioSubfolder, exportRadioZip].forEach(radio => {
+    if (radio) radio.addEventListener('change', updateExportPathRadioUi);
+});
+if (customPathInput) customPathInput.addEventListener('input', savePathPreferences);
+if (subfolderInput) subfolderInput.addEventListener('input', savePathPreferences);
+if (exportFormatSelect) exportFormatSelect.addEventListener('change', savePathPreferences);
+if (namingTemplateInput) namingTemplateInput.addEventListener('input', savePathPreferences);
+if (flatExportCheck) flatExportCheck.addEventListener('change', savePathPreferences);
+
+// 窗口尺寸自适应变动时重新触发画布刷新
+window.addEventListener('resize', () => {
+    if (currentFileId && filesMap[currentFileId]) {
+        drawCanvas(currentFileId);
+    }
+});
+
+// 页面加载完成后恢复上次工作状态
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    restoreWorkspaceState();
+} else {
+    window.addEventListener('DOMContentLoaded', () => {
+        restoreWorkspaceState();
+    });
+}

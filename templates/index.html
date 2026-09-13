@@ -19,17 +19,37 @@
                     </div>
                 </div>
                 <div id="batchSummary" class="summary-badge">0 个文件 · 共 0 张子图</div>
+                <div class="state-save-indicator" id="stateSaveIndicator">● 状态自动保存 (Ctrl+S 立即保存)</div>
                 <div id="fileListContainer" class="file-list-box"></div>
             </div>
 
             <div class="panel-section export-section">
                 <div class="section-header">批量导出与归档</div>
                 <div class="ctrl-group">
-                    <div class="ctrl-label-row"><span>导出目标类型</span></div>
-                    <select id="exportType" class="select-input">
-                        <option value="zip">下载压缩包 (ZIP)</option>
-                        <option value="local">保存到项目 output 目录</option>
-                    </select>
+                    <div class="ctrl-label-row"><span>导出保存位置</span></div>
+                    <div class="save-location-group">
+                        <label class="radio-row path-radio-label">
+                            <input type="radio" name="exportPathOption" value="custom" id="exportRadioCustom">
+                            <span>保存到：</span>
+                        </label>
+                        <div class="path-input-wrap">
+                            <input type="text" id="customPathInput" class="text-input" placeholder="例如: D:\Pictures\BandiView" disabled>
+                        </div>
+
+                        <label class="radio-row path-radio-label" style="margin-top: 8px;">
+                            <input type="radio" name="exportPathOption" value="subfolder" id="exportRadioSubfolder" checked>
+                            <span>存储到名称如下的子文件夹</span>
+                        </label>
+                        <div class="path-input-wrap">
+                            <input type="text" id="subfolderInput" class="text-input" value="output" placeholder="子文件夹名称，默认 output">
+                        </div>
+
+                        <label class="radio-row path-radio-label" style="margin-top: 8px;">
+                            <input type="radio" name="exportPathOption" value="zip" id="exportRadioZip">
+                            <span>打包下载压缩包 (ZIP)</span>
+                        </label>
+                    </div>
+                    <input type="hidden" id="exportType" value="local">
                 </div>
                 <div class="ctrl-group">
                     <div class="ctrl-label-row"><span>图片存储格式</span></div>
@@ -41,7 +61,7 @@
                 <div class="ctrl-group">
                     <div class="ctrl-label-row"><span>自定义命名模板</span></div>
                     <input type="text" id="namingTemplate" value="{original}_{index:02d}" class="text-input">
-                    <div class="tip-text">通配符: {original} 原名, {index:02d} 两位序号 (如 01), {index} 序号</div>
+                    <div class="tip-text">通配符: {original} 原名, {index:02d} 两位序号, {index} 序号</div>
                 </div>
                 <div class="ctrl-group">
                     <label class="checkbox-row">
@@ -109,6 +129,9 @@
         </div>
         <textarea id="consoleLog" readonly>控制台就绪，请上传文件开始处理...</textarea>
     </div>
+
+    <!-- 状态保存与操作反馈 Toast -->
+    <div id="statusToast" class="status-toast" style="display: none;"></div>
 
     <script src="/static/js/app.js"></script>
 </body>

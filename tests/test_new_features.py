@@ -158,3 +158,81 @@ def test_export_jpg_api(client, tmp_path):
     assert exp_data['count'] >= 1
     assert exp_data['images'][0]['name'].endswith('.jpg')
     assert '_export_01.jpg' in exp_data['images'][0]['name']
+
+def test_session_check_and_preview(client):
+    # 验证无效 session
+    res_invalid = client.post('/api/check_session', json={'session_id': 'non_existent_session_id_123'})
+    assert res_invalid.status_code == 200
+    assert res_invalid.get_json()['valid'] is False
+
+    # 上传生成有效 session
+    img = np.full((100, 100, 3), 255, dtype=np.uint8)
+    ok, buf = cv2.imencode('.png', img)
+    assert ok
+    from io import BytesIO
+    upload_res = client.post(
+        '/api/upload',
+        data={'file': (BytesIO(buf.tobytes()), 'test_check.png')},
+        content_type='multipart/form-data'
+    )
+    assert upload_res.status_code == 200
+    upload_data = upload_res.get_json()
+    sid = upload_data['session_id']
+    fid = upload_data['file_id']
+
+    # 验证有效 session
+    res_valid = client.post('/api/check_session', json={'session_id': sid})
+    assert res_valid.status_code == 200
+    assert res_valid.get_json()['valid'] is True
+
+    # 验证获取预览图接口
+    prev_res = client.get(f'/api/get_file_preview?session_id={sid}&file_id={fid}')
+    assert prev_res.status_code == 200
+    assert prev_res.content_type == 'image/png'
+
+def test_export_custom_path_and_subfolder(client, tmp_path):
+    img = np.full((200, 200, 3), 255, dtype=np.uint8)
+    img[20:80, 20:80] = 0
+    ok, buf = cv2.imencode('.png', img)
+    assert ok
+    from io import BytesIO
+    upload_res = client.post(
+        '/api/upload',
+        data={'file': (BytesIO(buf.tobytes()), 'test_path.png')},
+        content_type='multipart/form-data'
+    )
+    upload_data = upload_res.get_json()
+    sid = upload_data['session_id']
+    fid = upload_data['file_id']
+
+    rects = [{"x": 20, "y": 20, "w": 60, "h": 60, "orient": 0, "excluded": False}]
+
+    # 1. 测试自定义绝对路径导出
+    custom_dir = str(tmp_path / "custom_output_dir")
+    res_custom = client.post('/api/export', json={
+        'session_id': sid,
+        'export_type': 'local',
+        'path_mode': 'custom',
+        'custom_path': custom_dir,
+        'format': 'jpg',
+        'files': [{'file_id': fid, 'filename': 'test_path.png', 'rects': rects}]
+    })
+    assert res_custom.status_code == 200
+    c_data = res_custom.get_json()
+    assert os.path.exists(custom_dir)
+    assert c_data['count'] == 1
+
+    # 2. 测试子文件夹导出
+    res_sub = client.post('/api/export', json={
+        'session_id': sid,
+        'export_type': 'local',
+        'path_mode': 'subfolder',
+        'subfolder': 'test_sub_run',
+        'format': 'jpg',
+        'files': [{'file_id': fid, 'filename': 'test_path.png', 'rects': rects}]
+    })
+    assert res_sub.status_code == 200
+    s_data = res_sub.get_json()
+    assert 'test_sub_run' in s_data['local_path']
+    assert os.path.exists(s_data['local_path'])
+
