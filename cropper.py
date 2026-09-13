@@ -38,8 +38,14 @@ class ImageCropper:
 
     @staticmethod
     def estimate_best_threshold(image_gray, bg_type="light"):
-        """通过 Otsu 算法分析灰度直方图，估算最佳二值化阈值。"""
+        """通过分析灰度直方图估算最佳二值化阈值（抗纯白盖板与底纸纹理干扰）。"""
         blurred = cv2.GaussianBlur(image_gray, (5, 5), 0)
+        if bg_type == "light":
+            # 过滤扫描盖板纯白反光区域（>242）以准确分离照片暗部与相册底纸
+            valid_pixels = blurred[blurred < 242]
+            if valid_pixels.size > 100:
+                otsu_val, _ = cv2.threshold(valid_pixels, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                return int(max(60, min(185, round(otsu_val))))
         thresh_type = cv2.THRESH_BINARY_INV if bg_type == "light" else cv2.THRESH_BINARY
         otsu_val, _ = cv2.threshold(blurred, 0, 255, thresh_type + cv2.THRESH_OTSU)
         return int(round(otsu_val))
@@ -50,10 +56,10 @@ class ImageCropper:
         预处理预览图像并生成二值化掩模。
         threshold_mode:
             - 'fixed': 固定阈值
-            - 'otsu': Otsu 自动全局阈值
+            - 'otsu': Otsu 自动全局阈值（智能抗相册底纸干扰）
             - 'adaptive': 自适应局部高斯阈值
         morph_size:
-            形态学平滑核大小 (0 为不进行形态学处理)
+            形态学平滑核大小 (0 为使用默认滤波)
         """
         if blur_kernel % 2 == 0 or blur_kernel <= 0:
             blur_kernel = max(3, blur_kernel | 1)
@@ -62,7 +68,16 @@ class ImageCropper:
         thresh_type = cv2.THRESH_BINARY_INV if bg_type == "light" else cv2.THRESH_BINARY
 
         if threshold_mode == "otsu":
-            _, thresh = cv2.threshold(blurred, 0, 255, thresh_type + cv2.THRESH_OTSU)
+            if bg_type == "light":
+                valid_pixels = blurred[blurred < 242]
+                if valid_pixels.size > 100:
+                    otsu_val, _ = cv2.threshold(valid_pixels, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                    clamped_thresh = int(max(60, min(185, round(otsu_val))))
+                    _, thresh = cv2.threshold(blurred, clamped_thresh, 255, cv2.THRESH_BINARY_INV)
+                else:
+                    _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            else:
+                _, thresh = cv2.threshold(blurred, 0, 255, thresh_type + cv2.THRESH_OTSU)
         elif threshold_mode == "adaptive":
             block_size = max(11, ((threshold_val // 4) * 2 + 1))
             c_val = 5
@@ -72,13 +87,12 @@ class ImageCropper:
         else:
             _, thresh = cv2.threshold(blurred, threshold_val, 255, thresh_type)
 
-        # 形态学滤波：闭运算（闭合断裂微缝）与轻度开运算（消除边缘毛刺）
-        if morph_size and morph_size >= 2:
-            k_close = cv2.getStructuringElement(cv2.MORPH_RECT, (morph_size, morph_size))
-            thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, k_close)
-            if morph_size >= 4:
-                k_open = cv2.getStructuringElement(cv2.MORPH_RECT, (morph_size - 2, morph_size - 2))
-                thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, k_open)
+        # 默认消除细小斜条纹与纸纹噪点
+        active_morph = max(3, morph_size) if morph_size else 3
+        k_open = cv2.getStructuringElement(cv2.MORPH_RECT, (active_morph, active_morph))
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, k_open)
+        k_close = cv2.getStructuringElement(cv2.MORPH_RECT, (active_morph + 2, active_morph + 2))
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, k_close)
 
         return blurred, thresh
 
@@ -98,12 +112,19 @@ class ImageCropper:
             rect_area = rw * rh
             contour_area = cv2.contourArea(c)
 
-            effective_area = max(contour_area, rect_area)
-            area_pct = (effective_area / total_area) * 100.0
+            # 核心约束 1: 实心度 (Solidity) 过滤。真实照片轮廓与其最小外接矩形高度填充；
+            # 滤除由斜纹/布纹离散噪点构成的空心散乱怪框
+            solidity = contour_area / max(1.0, rect_area)
+            if solidity < 0.60:
+                filtered_count += 1
+                continue
+
+            # 核心约束 2: 面积以真实实心轮廓面积为基准，避免虚高
+            area_pct = (contour_area / total_area) * 100.0
 
             min_dim = max(1.0, min(rw, rh))
             aspect_ratio = max(rw, rh) / min_dim
-            if aspect_ratio > 10.0:
+            if aspect_ratio > 8.0:
                 filtered_count += 1
                 continue
 

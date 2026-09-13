@@ -2,111 +2,234 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>AutoCropper Local Debugger - 自动裁剪调试工具</title>
+    <title>AutoCropper - 智能图像批量裁剪工作台</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <div class="main-container">
-        <!-- 左侧控制栏 -->
-        <div class="sidebar">
-            <!-- 文件选择 -->
-            <div class="sidebar-section file-list-section">
-                <h3>图片输入源 (多选)</h3>
+    <div class="workbench-layout">
+        <!-- 1. 左侧面板：文件输入与导出归档 -->
+        <aside class="panel-left">
+            <div class="panel-section file-manager-section">
+                <div class="section-header">输入源与扫描件</div>
                 <div class="ctrl-group">
                     <input type="file" id="fileInput" accept="image/*" multiple style="display: none;">
-                    <button id="uploadBtn" class="btn-secondary">选择本地图片</button>
-                    <div id="fileMeta" style="font-size: 11px; margin-top: 5px; color: var(--text-muted);">
-                        等待文件载入...
+                    <div style="display: flex; gap: 6px;">
+                        <button id="uploadBtn" class="btn-secondary" style="flex: 1;">添加本地图片</button>
+                        <button id="clearAllBtn" class="btn-secondary" style="width: 52px;" title="清空全部已载入文件">清空</button>
                     </div>
+                    <div id="fileMeta" class="status-tip">等待文件载入...</div>
                 </div>
-                <div id="batchSummary" style="font-size: 11px; margin-top: 5px; color: var(--accent-color); font-weight: bold; font-family: monospace;">
-                    [ 已载入: 0 个文件 | 共检测到 0 张子照片 ]
-                </div>
+                <div id="batchSummary" class="summary-badge">[ 已载入: 0 个文件 | 共 0 张子图 ]</div>
                 <div id="importProgress" class="import-progress" hidden>
                     <div id="importProgressText" class="import-progress-text">准备导入…</div>
                     <div class="import-progress-track">
                         <div id="importProgressFill" class="import-progress-fill"></div>
                     </div>
                 </div>
-                <!-- 批量列表容器 -->
-                <div id="fileListContainer"></div>
+                <div id="fileListContainer" class="file-list-box"></div>
             </div>
 
-            <!-- 全局裁剪与导出动作区 -->
-            <div class="sidebar-section">
-                <h3>全局裁剪与导出</h3>
+            <div class="panel-section export-section">
+                <div class="section-header">批量导出与归档</div>
                 <div class="ctrl-group">
-                    <div class="ctrl-label-row">
-                        <span>导出目标类型</span>
-                    </div>
-                    <select id="exportType">
+                    <div class="ctrl-label-row"><span>导出目标类型</span></div>
+                    <select id="exportType" class="select-input">
                         <option value="zip">下载压缩包 (ZIP)</option>
-                        <option value="local">直接保存到本地项目 output 目录</option>
+                        <option value="local">保存到项目 output 目录</option>
                     </select>
                 </div>
                 <div class="ctrl-group">
-                    <div class="ctrl-label-row">
-                        <span>图片存储格式</span>
-                    </div>
-                    <select id="exportFormat">
+                    <div class="ctrl-label-row"><span>图片存储格式</span></div>
+                    <select id="exportFormat" class="select-input">
                         <option value="jpg" selected>JPG (最高画质 / 快速体积小)</option>
                         <option value="png">PNG (无损原画 / 体积较大)</option>
                     </select>
                 </div>
                 <div class="ctrl-group">
-                    <div class="ctrl-label-row">
-                        <span>自定义命名模板</span>
-                    </div>
-                    <input type="text" id="namingTemplate" value="{original}_crop_{index:02d}" style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-main); padding: 4px 6px; font-size: 11px; font-family: monospace;">
-                    <div style="font-size: 10px; color: var(--text-muted); margin-top: 3px; line-height: 1.3;">
-                        通配符: {original} 原名, {index:02d} 补零序号, {index} 纯数字, {date} 日期
-                    </div>
+                    <div class="ctrl-label-row"><span>自定义命名模板</span></div>
+                    <input type="text" id="namingTemplate" value="{original}_crop_{index:02d}" class="text-input">
+                    <div class="tip-text">通配符: {original} 原名, {index:02d} 序号, {date} 日期</div>
                 </div>
                 <div class="ctrl-group">
-                    <label class="flat-export-label">
+                    <label class="checkbox-row">
                         <input type="checkbox" id="flatExport">
-                        <span>不建立子文件夹（全部导出到同一目录）</span>
+                        <span>不建子目录（全部平铺导出）</span>
                     </label>
                 </div>
                 <button id="exportBtn" class="btn-primary" disabled>开始执行图像裁剪</button>
-                <button id="syncParamsBtn" class="btn-secondary" style="margin-top: 10px;" disabled>同步当前参数到所有图片</button>
             </div>
-        </div>
+        </aside>
 
-        <!-- 右侧工作区 -->
-        <div class="workspace">
-            <!-- 视图模式切换 -->
-            <div class="tabs-bar">
-                <div class="tab-item active" data-mode="original">[1. 原图与裁剪框]</div>
-                <div class="tab-item" data-mode="threshold">[2. 二值化调试图]</div>
-                <div class="tab-item" data-mode="blurred">[3. 灰度模糊图]</div>
+        <!-- 2. 中间面板：视口工作区 -->
+        <main class="panel-center">
+            <!-- 视口顶部工具与模式栏 -->
+            <header class="viewport-toolbar">
+                <div class="tabs-group">
+                    <div class="tab-item active" data-mode="original">[1. 原图与选框]</div>
+                    <div class="tab-item" data-mode="threshold">[2. 二值化调试图]</div>
+                    <div class="tab-item" data-mode="blurred">[3. 灰度模糊图]</div>
+                </div>
+                <div class="viewport-info" id="viewportInfo">未选择文件</div>
+                <div class="shortcut-tip">Ctrl: 自由拖拽 · Shift: 框选/多选</div>
+            </header>
+
+            <!-- 核心画布显示区 -->
+            <div class="canvas-viewport" id="canvasViewport">
+                <div class="upload-dropzone" id="dropZone">
+                    <div class="drop-title">[ 拖拽任意数量扫描件至此窗口 ]</div>
+                    <div class="drop-sub">支持多图批量导入与自动识别 | 或点击左侧“添加本地图片”</div>
+                </div>
+                <canvas id="mainCanvas" style="display: none;"></canvas>
             </div>
 
-            <!-- 画布呈现区 (支持 PDF 纵向级联排版) -->
-            <div class="canvas-container" id="canvasContainer" style="display: flex; flex-direction: column; gap: 20px; align-items: center; justify-content: flex-start;">
-                <div class="upload-box" id="dropZone" style="max-width: 540px; border: 2px dashed var(--border-color); padding: 50px 30px;">
-                    <div style="font-size: 13px; font-weight: bold; margin-bottom: 10px; color: var(--text-main); font-family: monospace;">
-                        [ 拖拽任意数量的扫描件到此窗口任意位置 ]
+            <!-- 底部子图预览抽屉 -->
+            <div class="preview-drawer">
+                <div class="drawer-header">
+                    <span>矫正子图预览</span>
+                    <span class="drawer-hint">Z/C 旋转90° · X 转180°/反选排除 · Shift 多选</span>
+                </div>
+                <div class="preview-strip" id="cropPreviewStrip">
+                    <div class="empty-hint">暂无检出子图</div>
+                </div>
+            </div>
+
+            <!-- 最底部紧凑控制台栏 -->
+            <footer class="statusbar">
+                <div class="statusbar-toggle" id="consoleToggle">控制台日志 ▲</div>
+                <div class="statusbar-msg" id="statusbarMsg">控制台就绪</div>
+            </footer>
+            <div class="console-drawer" id="consoleDrawer" style="display: none;">
+                <textarea id="consoleLog" readonly>控制台就绪，请上传文件开始处理...</textarea>
+            </div>
+        </main>
+
+        <!-- 3. 右侧面板：当前图片参数检查器 (常驻单一面板) -->
+        <aside class="panel-right" id="inspectorPanel">
+            <div class="panel-section">
+                <div class="section-header">预处理调优</div>
+                <div class="ctrl-group">
+                    <div class="ctrl-label-row"><span>背景色模式</span></div>
+                    <div class="radio-row">
+                        <label><input type="radio" name="bgType" value="light" checked> 浅色白底</label>
+                        <label><input type="radio" name="bgType" value="dark"> 深色黑底</label>
                     </div>
-                    <div style="font-size: 11px; color: var(--text-muted); font-family: monospace;">
-                        支持多文件批量上传与识别 | 或点击左侧“选择本地图片”按钮进行导入
+                </div>
+                <div class="ctrl-group">
+                    <div class="ctrl-label-row"><span>高斯模糊大小</span></div>
+                    <select id="blurKernel" class="select-input">
+                        <option value="1">1 (无模糊)</option>
+                        <option value="3" selected>3</option>
+                        <option value="5">5</option>
+                        <option value="7">7</option>
+                        <option value="9">9</option>
+                        <option value="11">11</option>
+                        <option value="15">15</option>
+                        <option value="21">21</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-header">分割与阈值</div>
+                <div class="ctrl-group">
+                    <div class="ctrl-label-row"><span>二值化算法模式</span></div>
+                    <select id="threshMode" class="select-input">
+                        <option value="fixed" selected>固定阈值 (手动微调)</option>
+                        <option value="otsu">Otsu 大津法 (自动双峰)</option>
+                        <option value="adaptive">自适应局部高斯 (抗发黄/暗角)</option>
+                    </select>
+                </div>
+                <div class="ctrl-group">
+                    <div class="ctrl-label-row">
+                        <span>二值化阈值</span>
+                        <span id="threshValLabel" class="val-badge">200</span>
+                    </div>
+                    <div class="ctrl-input-row">
+                        <input type="range" id="threshold" min="0" max="255" value="200" class="range-input">
+                        <input type="number" id="thresholdNum" min="0" max="255" value="200" class="num-input">
+                        <button id="estimateThreshBtn" class="btn-mini" title="基于直方图自动估算最佳阈值">估算</button>
+                    </div>
+                </div>
+                <div class="ctrl-group">
+                    <div class="ctrl-label-row">
+                        <span>形态学平滑 (闭合缝隙)</span>
+                        <span id="morphValLabel" class="val-badge">0 px</span>
+                    </div>
+                    <div class="ctrl-input-row">
+                        <input type="range" id="morphSizeRange" min="0" max="15" value="0" class="range-input">
+                        <input type="number" id="morphSizeNum" min="0" max="15" value="0" class="num-input">
+                    </div>
+                </div>
+                <div class="ctrl-group">
+                    <label class="checkbox-row">
+                        <input type="checkbox" id="autoRotate" checked>
+                        <span>自动倾斜矫正 (旋转摆正照片)</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-header">轮廓面积与边缘</div>
+                <div class="ctrl-group">
+                    <div class="ctrl-label-row">
+                        <span>最小面积占比 (%)</span>
+                        <span id="minAreaValLabel" class="val-badge">0.8%</span>
+                    </div>
+                    <div class="ctrl-input-row">
+                        <input type="range" id="minAreaRange" min="0.01" max="20" step="0.05" value="0.8" class="range-input">
+                        <input type="number" id="minArea" min="0.01" max="100" step="0.05" value="0.8" class="num-input" style="width: 50px;">
+                    </div>
+                </div>
+                <div class="ctrl-group">
+                    <div class="ctrl-label-row">
+                        <span>最大面积占比 (%)</span>
+                        <span id="maxAreaValLabel" class="val-badge">80%</span>
+                    </div>
+                    <div class="ctrl-input-row">
+                        <input type="range" id="maxAreaRange" min="5" max="100" step="0.5" value="80.0" class="range-input">
+                        <input type="number" id="maxArea" min="0.1" max="100" step="0.5" value="80.0" class="num-input" style="width: 50px;">
+                    </div>
+                </div>
+                <div class="ctrl-group">
+                    <div class="ctrl-label-row">
+                        <span>外扩边缘 (px)</span>
+                        <span id="paddingValLabel" class="val-badge">2 px</span>
+                    </div>
+                    <div class="ctrl-input-row">
+                        <input type="range" id="padding" min="-50" max="50" value="2" class="range-input">
+                        <input type="number" id="paddingNum" min="-50" max="50" value="2" class="num-input">
                     </div>
                 </div>
             </div>
 
-            <!-- 日志栏 -->
-            <div class="console-panel">
-                <div class="console-title">工程控制台日志 (CONSOLE LOGS)</div>
-                <textarea id="consoleLog" readonly>控制台就绪，请上传文件开始处理...</textarea>
+            <div class="panel-section">
+                <div class="section-header">
+                    <span>选框工具箱</span>
+                    <span id="multiCountBadge" class="val-badge">已选 0 个</span>
+                </div>
+                <div class="tool-grid full">
+                    <button id="autoOrientBtn" class="btn-action" title="基于人脸与图像特征智能预判朝向并摆正">自动纠正所有朝向</button>
+                </div>
+                <div class="tool-grid">
+                    <button id="mergeCropsBtn" class="btn-tool" title="合并选中的多个框 (快捷键: M)">合并多框 (M)</button>
+                    <button id="selectAllBtn" class="btn-tool" title="全选当前图片的所有裁剪框 (快捷键: Ctrl+A)">全选 (Ctrl+A)</button>
+                </div>
+                <div class="tool-grid">
+                    <button id="splitVCropBtn" class="btn-tool" title="将当前选中框垂直二等分 (快捷键: V)">垂直拆分 (V)</button>
+                    <button id="splitHCropBtn" class="btn-tool" title="将当前选中框水平二等分 (快捷键: H)">水平拆分 (H)</button>
+                </div>
+                <div class="tool-grid">
+                    <button id="delCropBtn" class="btn-tool danger" title="删除选中的裁剪框 (快捷键: Delete / Backspace)">删除选中框</button>
+                    <button id="reDetectBtn" class="btn-tool" title="使用当前参数重新检测">重新自动检测</button>
+                </div>
+                <button id="syncParamsBtn" class="btn-secondary" style="margin-top: 10px;" disabled>同步当前参数到所有图片</button>
             </div>
-        </div>
+        </aside>
     </div>
 
     <!-- 全局拖放遮罩层 -->
-    <div id="dragOverlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 122, 204, 0.12); border: 4px dashed var(--accent-color); z-index: 9999; justify-content: center; align-items: center; pointer-events: none; box-sizing: border-box;">
-        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); padding: 20px 40px; font-size: 13px; font-weight: bold; color: var(--text-main); font-family: monospace;">
-            [ 释放鼠标以批量导入扫描件 ]
-        </div>
+    <div id="dragOverlay" class="drag-overlay" style="display: none;">
+        <div class="drag-overlay-box">[ 释放鼠标以批量导入扫描件 ]</div>
     </div>
 
     <script src="/static/js/app.js"></script>
