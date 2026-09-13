@@ -74,7 +74,7 @@ def preview_crops():
     bg_type = data.get("bg_type", "light")
     min_area_pct = float(data.get("min_area_pct", 0.8))
     max_area_pct = float(data.get("max_area_pct", 80.0))
-    padding = int(data.get("padding", 5))
+    padding = int(data.get("padding", 2))
     debug_mode = data.get("debug_mode", "original")
     
     session_path = os.path.join(UPLOAD_DIR, session_id, file_id)

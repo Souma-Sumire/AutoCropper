@@ -339,25 +339,33 @@ async function handleFiles(files) {
                     <div class="ctrl-group">
                         <div class="ctrl-label-row">
                             <span>最小面积占比 (%) <span style="cursor:help;color:var(--accent-color);font-weight:bold;" title="包围盒实际占画面面积低于此值的噪点会被忽略。已调小默认值以识别中小照片。">[?]</span></span>
+                            <span id="minAreaValLabel-${fileId}" style="font-family:monospace; font-weight:bold; color:var(--accent-color);">0.8%</span>
                         </div>
-                        <input type="number" id="minArea-${fileId}" min="0.05" max="100" step="0.1" value="0.8" style="width:100%; background:var(--bg-primary); color:var(--text-main); border:1px solid var(--border-color); font-size:11px; padding:3px; box-sizing:border-box;">
+                        <div class="ctrl-input-row" style="display:flex; gap:10px; align-items:center;">
+                            <input type="range" id="minAreaRange-${fileId}" min="0.01" max="20" step="0.05" value="0.8" style="flex:1; cursor:pointer;">
+                            <input type="number" id="minArea-${fileId}" min="0.01" max="100" step="0.05" value="0.8" style="width:50px; background:var(--bg-primary); color:var(--text-main); border:1px solid var(--border-color); font-size:11px; text-align:right; padding:2px;">
+                        </div>
                     </div>
                     
                     <div class="ctrl-group">
                         <div class="ctrl-label-row">
                             <span>最大面积占比 (%) <span style="cursor:help;color:var(--accent-color);font-weight:bold;" title="任何面积占比超过此阈值的大块区域会被忽略，防止将整个扫描背景误当做照片。">[?]</span></span>
+                            <span id="maxAreaValLabel-${fileId}" style="font-family:monospace; font-weight:bold; color:var(--accent-color);">80%</span>
                         </div>
-                        <input type="number" id="maxArea-${fileId}" min="0.1" max="100" step="0.1" value="80.0" style="width:100%; background:var(--bg-primary); color:var(--text-main); border:1px solid var(--border-color); font-size:11px; padding:3px; box-sizing:border-box;">
+                        <div class="ctrl-input-row" style="display:flex; gap:10px; align-items:center;">
+                            <input type="range" id="maxAreaRange-${fileId}" min="5" max="100" step="0.5" value="80.0" style="flex:1; cursor:pointer;">
+                            <input type="number" id="maxArea-${fileId}" min="0.1" max="100" step="0.5" value="80.0" style="width:50px; background:var(--bg-primary); color:var(--text-main); border:1px solid var(--border-color); font-size:11px; text-align:right; padding:2px;">
+                        </div>
                     </div>
 
                     <div class="ctrl-group">
                         <div class="ctrl-label-row">
                             <span>外扩边缘 (px) <span style="cursor:help;color:var(--accent-color);font-weight:bold;" title="在真实矩形外围额外扩充的宽度。正数朝外防止切边，负数朝内收紧。">[?]</span></span>
-                            <span id="paddingValLabel-${fileId}" style="font-family:monospace; font-weight:bold; color:var(--accent-color);">5 px</span>
+                            <span id="paddingValLabel-${fileId}" style="font-family:monospace; font-weight:bold; color:var(--accent-color);">2 px</span>
                         </div>
                         <div class="ctrl-input-row" style="display:flex; gap:10px; align-items:center;">
-                            <input type="range" id="padding-${fileId}" min="-50" max="50" value="5" style="flex:1; cursor:pointer;">
-                            <input type="number" id="paddingNum-${fileId}" min="-50" max="50" value="5" style="width:45px; background:var(--bg-primary); color:var(--text-main); border:1px solid var(--border-color); font-size:11px; text-align:right; padding:2px;">
+                            <input type="range" id="padding-${fileId}" min="-50" max="50" value="2" style="flex:1; cursor:pointer;">
+                            <input type="number" id="paddingNum-${fileId}" min="-50" max="50" value="2" style="width:45px; background:var(--bg-primary); color:var(--text-main); border:1px solid var(--border-color); font-size:11px; text-align:right; padding:2px;">
                         </div>
                     </div>
 
@@ -389,7 +397,7 @@ async function handleFiles(files) {
                         bg_type: 'light',
                         min_area_pct: 0.8,
                         max_area_pct: 80.0,
-                        padding: 5,
+                        padding: 2,
                         auto_rotate: true
                     },
                     canvasEl: canvasEl,
@@ -439,75 +447,142 @@ function bindLocalEvents(fileId) {
     const paddingLabel = document.getElementById(`paddingValLabel-${fileId}`);
     const blurSelect = document.getElementById(`blurKernel-${fileId}`);
     const autoRotCheck = document.getElementById(`autoRotate-${fileId}`);
+    const minAreaRange = document.getElementById(`minAreaRange-${fileId}`);
     const minAreaInput = document.getElementById(`minArea-${fileId}`);
+    const minAreaLabel = document.getElementById(`minAreaValLabel-${fileId}`);
+    const maxAreaRange = document.getElementById(`maxAreaRange-${fileId}`);
     const maxAreaInput = document.getElementById(`maxArea-${fileId}`);
+    const maxAreaLabel = document.getElementById(`maxAreaValLabel-${fileId}`);
     const bgRadios = document.getElementsByName(`bgType-${fileId}`);
     const delCropBtn = document.getElementById(`delCropBtn-${fileId}`);
     const reDetectBtn = document.getElementById(`reDetectBtn-${fileId}`);
 
-    const triggerLocalDebouncedPreview = () => {
-        clearTimeout(debounceTimeout);
-        debounceTimeout = setTimeout(() => {
-            requestPreview(fileId);
-        }, 80);
+    let localFastTimer = null;
+    const triggerFastPreview = (skipPreviews = true) => {
+        clearTimeout(localFastTimer);
+        localFastTimer = setTimeout(() => {
+            requestPreview(fileId, skipPreviews);
+        }, 16);
     };
 
     threshRange.addEventListener('input', (e) => {
         threshNum.value = e.target.value;
         threshLabel.innerText = e.target.value;
         fileData.params.threshold = parseInt(e.target.value);
-        triggerLocalDebouncedPreview();
+        triggerFastPreview(true);
+    });
+    threshRange.addEventListener('change', (e) => {
+        fileData.params.threshold = parseInt(e.target.value);
+        requestPreview(fileId, false);
+    });
+    threshNum.addEventListener('input', (e) => {
+        let val = Math.max(0, Math.min(255, parseInt(e.target.value) || 0));
+        threshRange.value = val;
+        threshLabel.innerText = val;
+        fileData.params.threshold = val;
+        triggerFastPreview(true);
     });
     threshNum.addEventListener('change', (e) => {
         let val = Math.max(0, Math.min(255, parseInt(e.target.value) || 0));
         threshRange.value = val;
-        threshNum.value = val;
         threshLabel.innerText = val;
         fileData.params.threshold = val;
-        triggerLocalDebouncedPreview();
+        requestPreview(fileId, false);
     });
 
     paddingRange.addEventListener('input', (e) => {
         paddingNum.value = e.target.value;
         paddingLabel.innerText = e.target.value + ' px';
         fileData.params.padding = parseInt(e.target.value);
-        triggerLocalDebouncedPreview();
+        triggerFastPreview(true);
+    });
+    paddingRange.addEventListener('change', (e) => {
+        fileData.params.padding = parseInt(e.target.value);
+        requestPreview(fileId, false);
+    });
+    paddingNum.addEventListener('input', (e) => {
+        let val = Math.max(-50, Math.min(50, parseInt(e.target.value) || 0));
+        paddingRange.value = val;
+        paddingLabel.innerText = val + ' px';
+        fileData.params.padding = val;
+        triggerFastPreview(true);
     });
     paddingNum.addEventListener('change', (e) => {
         let val = Math.max(-50, Math.min(50, parseInt(e.target.value) || 0));
         paddingRange.value = val;
-        paddingNum.value = val;
         paddingLabel.innerText = val + ' px';
         fileData.params.padding = val;
-        triggerLocalDebouncedPreview();
+        requestPreview(fileId, false);
     });
 
     blurSelect.addEventListener('change', (e) => {
         fileData.params.blur_kernel = parseInt(e.target.value);
-        triggerLocalDebouncedPreview();
+        requestPreview(fileId, false);
     });
     autoRotCheck.addEventListener('change', (e) => {
         fileData.params.auto_rotate = e.target.checked;
         drawCanvas(fileId);
         renderCropPreviews(fileId);
     });
+
+    if (minAreaRange) {
+        minAreaRange.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value) || 0.05;
+            minAreaInput.value = val;
+            if (minAreaLabel) minAreaLabel.innerText = val.toFixed(2) + '%';
+            fileData.params.min_area_pct = val;
+            triggerFastPreview(true);
+        });
+        minAreaRange.addEventListener('change', (e) => {
+            const val = parseFloat(e.target.value) || 0.05;
+            fileData.params.min_area_pct = val;
+            requestPreview(fileId, false);
+        });
+    }
     minAreaInput.addEventListener('input', (e) => {
-        fileData.params.min_area_pct = parseFloat(e.target.value) || 0.05;
-        triggerLocalDebouncedPreview();
+        const val = parseFloat(e.target.value) || 0.05;
+        if (minAreaRange) minAreaRange.value = Math.min(20, val);
+        if (minAreaLabel) minAreaLabel.innerText = val.toFixed(2) + '%';
+        fileData.params.min_area_pct = val;
+        triggerFastPreview(true);
     });
     minAreaInput.addEventListener('change', (e) => {
-        fileData.params.min_area_pct = parseFloat(e.target.value) || 0.05;
-        triggerLocalDebouncedPreview();
+        const val = parseFloat(e.target.value) || 0.05;
+        fileData.params.min_area_pct = val;
+        requestPreview(fileId, false);
+    });
+
+    if (maxAreaRange) {
+        maxAreaRange.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value) || 100.0;
+            maxAreaInput.value = val;
+            if (maxAreaLabel) maxAreaLabel.innerText = val.toFixed(1) + '%';
+            fileData.params.max_area_pct = val;
+            triggerFastPreview(true);
+        });
+        maxAreaRange.addEventListener('change', (e) => {
+            const val = parseFloat(e.target.value) || 100.0;
+            fileData.params.max_area_pct = val;
+            requestPreview(fileId, false);
+        });
+    }
+    maxAreaInput.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value) || 100.0;
+        if (maxAreaRange) maxAreaRange.value = val;
+        if (maxAreaLabel) maxAreaLabel.innerText = val.toFixed(1) + '%';
+        fileData.params.max_area_pct = val;
+        triggerFastPreview(true);
     });
     maxAreaInput.addEventListener('change', (e) => {
-        fileData.params.max_area_pct = parseFloat(e.target.value) || 100.0;
-        triggerLocalDebouncedPreview();
+        const val = parseFloat(e.target.value) || 100.0;
+        fileData.params.max_area_pct = val;
+        requestPreview(fileId, false);
     });
 
     bgRadios.forEach(radio => {
         radio.addEventListener('change', (e) => {
             fileData.params.bg_type = e.target.value;
-            triggerLocalDebouncedPreview();
+            requestPreview(fileId, false);
         });
     });
 
@@ -673,11 +748,21 @@ function mergeRectsPreserveFlip(oldRects, newRects) {
     });
 }
 
-function requestPreview(fileId) {
+function requestPreview(fileId, skipCropPreviews = false) {
     const targetId = fileId || currentFileId;
     if (!sessionId || !targetId) return;
 
     const fileData = filesMap[targetId];
+    if (!fileData) return;
+
+    // 取消尚未完成的前序请求，保证高频滑动不发生网络拥堵与回跳
+    if (fileData._previewAbort) {
+        fileData._previewAbort.abort();
+    }
+    const abortCtrl = new AbortController();
+    fileData._previewAbort = abortCtrl;
+    const reqSeq = (++fileData._previewSeq || (fileData._previewSeq = 1));
+
     const params = {
         session_id: sessionId,
         file_id: targetId,
@@ -688,10 +773,14 @@ function requestPreview(fileId) {
     fetch('/api/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params)
+        body: JSON.stringify(params),
+        signal: abortCtrl.signal
     })
     .then(res => res.json())
     .then(data => {
+        // 如果在此请求返回前已发起了更新的请求，直接丢弃过时结果
+        if (reqSeq !== fileData._previewSeq) return;
+
         if (data.error) {
             log(`图像调试出错: ${data.error}`);
             return;
@@ -703,21 +792,26 @@ function requestPreview(fileId) {
             fileData.selectedCropIndex = Math.max(0, fileData.rects.length - 1);
         }
 
-        if (targetId === currentFileId) {
-            log(`[${fileData.name}] ${data.log}`);
-        }
-
+        const validCount = (fileData.rects || []).filter(r => !r.excluded).length;
+        const totalCount = (fileData.rects || []).length;
         const badge = document.getElementById(`badge-${targetId}`);
-        if (badge) badge.innerText = data.rects.length;
+        if (badge) badge.innerText = validCount;
 
         const headerCount = document.getElementById(`page-count-${targetId}`);
-        if (headerCount) headerCount.innerText = `已提取: ${data.rects.length} 张`;
+        if (headerCount) {
+            headerCount.innerText = `已提取: ${validCount} 张${totalCount > validCount ? ` (含 ${totalCount - validCount} 个排除区)` : ''}`;
+        }
 
         updateBatchSummary();
         drawCanvas(targetId);
-        renderCropPreviews(targetId);
+
+        // 拖动过程中跳过开销巨大的缩略图切片生成，松开后或普通模式再生成
+        if (!skipCropPreviews) {
+            renderCropPreviews(targetId);
+        }
     })
     .catch(err => {
+        if (err.name === 'AbortError') return;
         log(`获取图像数据失败: ${err}`);
     });
 }
@@ -1600,10 +1694,16 @@ function drawCanvas(fileId) {
     const autoRotElem = document.getElementById(`autoRotate-${fileId}`);
     const isAutoRotate = autoRotElem ? autoRotElem.checked : true;
 
-    const img = new Image();
-    img.onload = function() {
-        canvas.width = img.width;
-        canvas.height = img.height;
+    const imageSrc = currentDebugMode === 'original' ? fileData.thumbnail : fileData.debugImgSrc;
+    if (!imageSrc) return;
+
+    const render = (img) => {
+        if (canvas.width !== img.width || canvas.height !== img.height) {
+            canvas.width = img.width;
+            canvas.height = img.height;
+        } else {
+            canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+        }
 
         canvasCtx.imageSmoothingEnabled = true;
         canvasCtx.imageSmoothingQuality = 'high';
@@ -1721,8 +1821,18 @@ function drawCanvas(fileId) {
             }
         }
     };
-    const imageSrc = currentDebugMode === 'original' ? fileData.thumbnail : fileData.debugImgSrc;
-    img.src = imageSrc;
+
+    if (fileData._cachedImg && fileData._cachedImgSrc === imageSrc && fileData._cachedImg.complete) {
+        render(fileData._cachedImg);
+    } else {
+        const img = new Image();
+        img.onload = () => {
+            fileData._cachedImg = img;
+            fileData._cachedImgSrc = imageSrc;
+            render(img);
+        };
+        img.src = imageSrc;
+    }
 }
 
 syncParamsBtn.addEventListener('click', () => {
@@ -1744,7 +1854,16 @@ syncParamsBtn.addEventListener('click', () => {
         document.getElementById(`blurKernel-${fileId}`).value = srcParams.blur_kernel;
         document.getElementById(`autoRotate-${fileId}`).checked = srcParams.auto_rotate;
         document.getElementById(`minArea-${fileId}`).value = srcParams.min_area_pct;
+        const minAreaRange = document.getElementById(`minAreaRange-${fileId}`);
+        if (minAreaRange) minAreaRange.value = srcParams.min_area_pct;
+        const minAreaLabel = document.getElementById(`minAreaValLabel-${fileId}`);
+        if (minAreaLabel) minAreaLabel.innerText = Number(srcParams.min_area_pct).toFixed(2) + '%';
+
         document.getElementById(`maxArea-${fileId}`).value = srcParams.max_area_pct;
+        const maxAreaRange = document.getElementById(`maxAreaRange-${fileId}`);
+        if (maxAreaRange) maxAreaRange.value = srcParams.max_area_pct;
+        const maxAreaLabel = document.getElementById(`maxAreaValLabel-${fileId}`);
+        if (maxAreaLabel) maxAreaLabel.innerText = Number(srcParams.max_area_pct).toFixed(1) + '%';
 
         const radios = document.getElementsByName(`bgType-${fileId}`);
         radios.forEach(radio => {
