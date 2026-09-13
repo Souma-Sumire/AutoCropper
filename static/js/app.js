@@ -420,7 +420,7 @@ async function handleFiles(files) {
                         threshold_mode: 'fixed',
                         morph_size: 0,
                         bg_type: 'light',
-                        min_area_pct: 0.8,
+                        min_area_pct: 0.25,
                         max_area_pct: 80.0,
                         padding: 2,
                         auto_rotate: true
