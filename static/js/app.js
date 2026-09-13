@@ -26,6 +26,7 @@ const exportBtn = document.getElementById('exportBtn');
 const tabItems = document.querySelectorAll('.tab-item');
 const viewportInfo = document.getElementById('viewportInfo');
 const canvasViewport = document.getElementById('canvasViewport');
+const streamContainer = document.getElementById('streamContainer');
 const dropZone = document.getElementById('dropZone');
 const mainCanvas = document.getElementById('mainCanvas');
 const cropPreviewStrip = document.getElementById('cropPreviewStrip');
@@ -34,37 +35,12 @@ const consoleToggle = document.getElementById('consoleToggle');
 const consoleDrawer = document.getElementById('consoleDrawer');
 const consoleLog = document.getElementById('consoleLog');
 const dragOverlay = document.getElementById('dragOverlay');
-
-// DOM 节点 - 右侧检查器
-const bgRadios = document.getElementsByName('bgType');
-const blurSelect = document.getElementById('blurKernel');
-const threshModeSelect = document.getElementById('threshMode');
-const threshRange = document.getElementById('threshold');
-const threshNum = document.getElementById('thresholdNum');
-const threshValLabel = document.getElementById('threshValLabel');
-const estimateThreshBtn = document.getElementById('estimateThreshBtn');
-const morphSizeRange = document.getElementById('morphSizeRange');
-const morphSizeNum = document.getElementById('morphSizeNum');
-const morphValLabel = document.getElementById('morphValLabel');
-const autoRotateCheck = document.getElementById('autoRotate');
-const minAreaRange = document.getElementById('minAreaRange');
-const minAreaInput = document.getElementById('minArea');
-const minAreaValLabel = document.getElementById('minAreaValLabel');
-const maxAreaRange = document.getElementById('maxAreaRange');
-const maxAreaInput = document.getElementById('maxArea');
-const maxAreaValLabel = document.getElementById('maxAreaValLabel');
-const paddingRange = document.getElementById('padding');
-const paddingNum = document.getElementById('paddingNum');
-const paddingValLabel = document.getElementById('paddingValLabel');
-const multiCountBadge = document.getElementById('multiCountBadge');
-const autoOrientBtn = document.getElementById('autoOrientBtn');
-const mergeCropsBtn = document.getElementById('mergeCropsBtn');
-const selectAllBtn = document.getElementById('selectAllBtn');
-const splitVCropBtn = document.getElementById('splitVCropBtn');
-const splitHCropBtn = document.getElementById('splitHCropBtn');
-const delCropBtn = document.getElementById('delCropBtn');
-const reDetectBtn = document.getElementById('reDetectBtn');
-const syncParamsBtn = document.getElementById('syncParamsBtn');
+const viewportLoading = document.getElementById('viewportLoading');
+const loadingProgressFill = document.getElementById('loadingProgressFill');
+const loadingPercentText = document.getElementById('loadingPercentText');
+const loadingFilename = document.getElementById('loadingFilename');
+const loadingCountText = document.getElementById('loadingCountText');
+const loadingDetail = document.getElementById('loadingDetail');
 
 function log(message) {
     const now = new Date();
@@ -223,26 +199,35 @@ function getSortedFileIds() {
     return Object.keys(filesMap).sort((a, b) => naturalCompare(filesMap[a].name, filesMap[b].name));
 }
 
-function setImportUi(active, current = 0, total = 0, name = '') {
+function setImportUi(active, current = 0, total = 0, name = '', detail = '') {
     isImporting = active;
     if (active) {
+        if (viewportLoading) viewportLoading.style.display = 'flex';
         importProgress.hidden = false;
-        const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+        const pct = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
+        
         importProgressFill.style.width = `${pct}%`;
         importProgressText.textContent = total
-            ? `导入中 [${current}/${total}]：${name}`
+            ? `导入中 [${Math.min(total, Math.ceil(current))}/${total}]：${name}`
             : '准备导入…';
+
+        if (loadingProgressFill) loadingProgressFill.style.width = `${pct}%`;
+        if (loadingPercentText) loadingPercentText.innerText = `${pct}%`;
+        if (loadingFilename) loadingFilename.innerText = name || '准备导入...';
+        if (loadingCountText) loadingCountText.innerText = `[${Math.min(total, Math.ceil(current))} / ${total}]`;
+        if (loadingDetail) loadingDetail.innerText = detail || '正在自适应测算阈值并分割子图...';
+
         uploadBtn.disabled = true;
-        uploadBtn.textContent = total ? `导入中 ${current}/${total}` : '导入中…';
+        uploadBtn.textContent = total ? `导入中 ${Math.min(total, Math.ceil(current))}/${total}` : '导入中…';
         fileMeta.innerText = total ? `正在载入: ${name}` : '正在导入文件…';
-        syncParamsBtn.disabled = true;
         setExportBusy(true, '导入中…');
     } else {
+        if (viewportLoading) viewportLoading.style.display = 'none';
         importProgress.hidden = true;
         importProgressFill.style.width = '0%';
+        if (loadingProgressFill) loadingProgressFill.style.width = '0%';
         uploadBtn.disabled = false;
         uploadBtn.textContent = '添加本地图片';
-        syncParamsBtn.disabled = Object.keys(filesMap).length === 0;
         setExportBusy(false);
     }
 }
@@ -258,31 +243,72 @@ function updateBatchSummary() {
     batchSummary.innerText = `[ 已载入: ${totalFiles} 个文件 | 共 ${totalCrops} 张子图 ]`;
 }
 
-// 标签切换
+function setFileDebugMode(fileId, mode) {
+    const fid = fileId || currentFileId;
+    if (!fid || !filesMap[fid]) return;
+    const fileData = filesMap[fid];
+    fileData.debugMode = mode;
+
+    const cardTabs = document.querySelectorAll(`.card-tab-btn[data-file-id="${fid}"]`);
+    cardTabs.forEach(btn => {
+        if (btn.getAttribute('data-mode') === mode) btn.classList.add('active');
+        else btn.classList.remove('active');
+    });
+
+    if (fid === currentFileId) {
+        currentDebugMode = mode;
+        tabItems.forEach(t => {
+            if (t.getAttribute('data-mode') === mode) t.classList.add('active');
+            else t.classList.remove('active');
+        });
+    }
+
+    const modeName = mode === 'original' ? '原图与选框' : mode === 'threshold' ? '二值化调试' : '灰度模糊';
+    log(`[${fileData.name}] 切换视图到: ${modeName}`);
+
+    if (mode === 'original' && fileData.detected) {
+        drawCanvas(fid);
+        renderCropPreviews(fid);
+    } else {
+        requestPreview(fid);
+    }
+}
+
+// 顶部标签切换：同步当前聚焦图片模式
 tabItems.forEach(tab => {
     tab.addEventListener('click', () => {
-        tabItems.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        currentDebugMode = tab.getAttribute('data-mode');
-        log(`切换调试视图到: ${tab.innerText}`);
-
-        if (currentFileId && filesMap[currentFileId]) {
-            if (currentDebugMode === 'original' && filesMap[currentFileId].detected) {
-                drawCanvas();
-                renderCropPreviews();
-            } else {
-                requestPreview(currentFileId);
-            }
+        const mode = tab.getAttribute('data-mode');
+        if (currentFileId) {
+            setFileDebugMode(currentFileId, mode);
+        } else {
+            currentDebugMode = mode;
+            tabItems.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
         }
     });
 });
 
-// 日志折叠控制
+// 犄角旮旯：右下角控制台弹层控制
+const closeLogBtn = document.getElementById('closeLogBtn');
+const clearLogBtn = document.getElementById('clearLogBtn');
+
 if (consoleToggle) {
     consoleToggle.addEventListener('click', () => {
         isConsoleOpen = !isConsoleOpen;
-        consoleDrawer.style.display = isConsoleOpen ? 'block' : 'none';
-        consoleToggle.innerText = isConsoleOpen ? '控制台日志 ▼' : '控制台日志 ▲';
+        if (consoleDrawer) consoleDrawer.style.display = isConsoleOpen ? 'flex' : 'none';
+        consoleToggle.innerText = isConsoleOpen ? '关闭控制台 ✕' : '控制台日志 ▤';
+    });
+}
+if (closeLogBtn) {
+    closeLogBtn.addEventListener('click', () => {
+        isConsoleOpen = false;
+        if (consoleDrawer) consoleDrawer.style.display = 'none';
+        if (consoleToggle) consoleToggle.innerText = '控制台日志 ▤';
+    });
+}
+if (clearLogBtn) {
+    clearLogBtn.addEventListener('click', () => {
+        if (consoleLog) consoleLog.value = '';
     });
 }
 
@@ -299,48 +325,93 @@ if (clearAllBtn) {
         renderFileList();
         updateBatchSummary();
         mainCanvas.style.display = 'none';
+        if (streamContainer) {
+            streamContainer.innerHTML = '';
+            streamContainer.style.display = 'none';
+        }
         dropZone.style.display = 'block';
-        cropPreviewStrip.innerHTML = '<div class="empty-hint">暂无检出子图</div>';
+        if (cropPreviewStrip) cropPreviewStrip.innerHTML = '<div class="empty-hint">暂无检出子图</div>';
         viewportInfo.innerText = '未选择文件';
         fileMeta.innerText = '等待文件载入...';
-        syncParamsBtn.disabled = true;
         setExportBusy(false);
         log('已清空所有图片数据。');
     });
 }
 
+// 全局彻底拦截浏览器默认拖放行为，防止在标签页中直接打开图片
+let dragCounter = 0;
+
+['dragenter', 'dragover', 'dragleave', 'drop'].forEach(evtName => {
+    window.addEventListener(evtName, (e) => {
+        e.preventDefault();
+    }, false);
+    document.addEventListener(evtName, (e) => {
+        e.preventDefault();
+    }, false);
+});
+
 window.addEventListener('dragenter', (e) => {
-    if (e.dataTransfer && e.dataTransfer.types && Array.from(e.dataTransfer.types).includes('Files')) {
-        dragOverlay.style.display = 'flex';
-    }
-});
-
-dragOverlay.addEventListener('dragleave', (e) => {
-    if (e.relatedTarget === null) {
-        dragOverlay.style.display = 'none';
-    }
-});
-
-dragOverlay.addEventListener('dragover', (e) => e.preventDefault());
-dragOverlay.addEventListener('drop', (e) => {
     e.preventDefault();
-    dragOverlay.style.display = 'none';
-    if (e.dataTransfer && e.dataTransfer.files.length > 0) {
-        handleFiles(e.dataTransfer.files);
+    if (e.dataTransfer && e.dataTransfer.types && Array.from(e.dataTransfer.types).includes('Files')) {
+        dragCounter++;
+        if (dragOverlay) dragOverlay.style.display = 'flex';
     }
-});
+}, false);
+
+window.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+    }
+}, false);
+
+window.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    dragCounter--;
+    if (dragCounter <= 0) {
+        dragCounter = 0;
+        if (dragOverlay) dragOverlay.style.display = 'none';
+    }
+}, false);
+
+window.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dragCounter = 0;
+    if (dragOverlay) dragOverlay.style.display = 'none';
+    const dt = e.dataTransfer;
+    if (dt && dt.files && dt.files.length > 0) {
+        handleFiles(dt.files);
+    }
+}, false);
+
+if (dropZone) {
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    }, false);
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dragCounter = 0;
+        if (dragOverlay) dragOverlay.style.display = 'none';
+        const dt = e.dataTransfer;
+        if (dt && dt.files && dt.files.length > 0) {
+            handleFiles(dt.files);
+        }
+    }, false);
+}
 
 async function handleFiles(files) {
     if (files.length === 0 || isImporting) return;
 
     const fileList = Array.from(files).sort((a, b) => naturalCompare(a.name, b.name));
     log(`准备上传并预处理 ${fileList.length} 个文件...`);
-    setImportUi(true, 0, fileList.length, fileList[0]?.name || '');
+    setImportUi(true, 0, fileList.length, fileList[0]?.name || '', '准备批量导入与预处理...');
 
     try {
         for (let i = 0; i < fileList.length; i++) {
             const file = fileList[i];
-            setImportUi(true, i + 1, fileList.length, file.name);
+            setImportUi(true, i + 0.1, fileList.length, file.name, '正在上传原始图像并生成预览...');
             log(`正在上传 [${i + 1}/${fileList.length}]: ${file.name}`);
 
             const formData = new FormData();
@@ -362,6 +433,9 @@ async function handleFiles(files) {
                 }
 
                 const fileId = data.file_id;
+                const autoThresh = (typeof data.suggested_threshold === 'number' && data.suggested_threshold > 0)
+                    ? data.suggested_threshold
+                    : 180;
 
                 filesMap[fileId] = {
                     name: data.filename,
@@ -376,7 +450,7 @@ async function handleFiles(files) {
                     selectedCropIndices: new Set([0]),
                     params: {
                         blur_kernel: 3,
-                        threshold: 200,
+                        threshold: autoThresh,
                         threshold_mode: 'fixed',
                         morph_size: 0,
                         bg_type: 'light',
@@ -391,9 +465,19 @@ async function handleFiles(files) {
                     _edgeCtx: null
                 };
 
+                setImportUi(true, i + 0.6, fileList.length, file.name, `已匹配最佳阈值(${autoThresh})，正在自动检测裁剪框...`);
                 renderFileList();
                 updateBatchSummary();
                 await silentRequestPreview(fileId);
+
+                const validCrops = (filesMap[fileId].rects || []).filter(r => !r.excluded).length;
+                setImportUi(true, i + 1, fileList.length, file.name, `已检出 ${validCrops} 张照片 [${i + 1}/${fileList.length}]`);
+                log(`[${file.name}] 自动阈值: ${autoThresh}, 检出照片: ${validCrops} 张`);
+
+                // 首张图片就绪后直接在底层激活显示
+                if (!currentFileId && i === 0) {
+                    selectFile(fileId);
+                }
             } catch (err) {
                 log(`上传通信异常: ${err}`);
             }
@@ -428,12 +512,566 @@ function renderFileList() {
             <span class="file-name" title="${item.name}">${item.name}</span>
             <span class="badge" id="badge-${id}">${validRectsCount}</span>
         `;
-        el.addEventListener('click', () => selectFile(id));
+        el.addEventListener('click', () => selectFile(id, true));
         fileListContainer.appendChild(el);
+    });
+
+    renderStreamContainer();
+}
+
+function renderStreamContainer() {
+    if (!streamContainer) return;
+    const sortedIds = getSortedFileIds();
+    if (sortedIds.length === 0) {
+        streamContainer.style.display = 'none';
+        dropZone.style.display = 'block';
+        return;
+    }
+
+    dropZone.style.display = 'none';
+    streamContainer.style.display = 'flex';
+
+    sortedIds.forEach((fileId, index) => {
+        let pageEl = document.getElementById(`page-${fileId}`);
+        const item = filesMap[fileId];
+        const validCount = (item.rects || []).filter(r => !r.excluded).length;
+        const itemMode = item.debugMode || 'original';
+
+        const isFixedMode = (item.params.threshold_mode === 'fixed');
+        const threshDisabledAttr = isFixedMode ? '' : 'disabled';
+        const threshDisabledStyle = isFixedMode ? '' : 'style="opacity: 0.4; cursor: not-allowed;"';
+        let threshBadgeText = item.params.threshold;
+        if (item.params.threshold_mode === 'otsu') threshBadgeText = `${item.params.threshold} (自动)`;
+        else if (item.params.threshold_mode === 'adaptive') threshBadgeText = '自适应';
+
+        if (!pageEl) {
+            pageEl = document.createElement('div');
+            pageEl.className = 'stream-page' + (fileId === currentFileId ? ' active' : '');
+            pageEl.id = `page-${fileId}`;
+            pageEl.dataset.fileId = fileId;
+            pageEl.innerHTML = `
+                <div class="stream-page-left">
+                    <div class="stream-page-header">
+                        <div class="stream-page-title">
+                            <span class="stream-page-num">[#${index + 1}]</span>
+                            <span class="stream-page-name" title="${item.name}">${item.name}</span>
+                            <span class="stream-page-dim">(${item.width}×${item.height})</span>
+                        </div>
+                        <div class="stream-page-actions">
+                            <div class="card-view-tabs" id="tabs-${fileId}">
+                                <button class="card-tab-btn ${itemMode === 'original' ? 'active' : ''}" data-mode="original" data-file-id="${fileId}" title="原图与标框 (快捷键: 1)">1. 原图</button>
+                                <button class="card-tab-btn ${itemMode === 'threshold' ? 'active' : ''}" data-mode="threshold" data-file-id="${fileId}" title="二值化调试图 (快捷键: 2)">2. 二值化</button>
+                                <button class="card-tab-btn ${itemMode === 'blurred' ? 'active' : ''}" data-mode="blurred" data-file-id="${fileId}" title="灰度滤波图 (快捷键: 3)">3. 滤波</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="stream-canvas-box">
+                        <canvas id="canvas-${fileId}" class="stream-canvas"></canvas>
+                    </div>
+                    <div class="stream-crops-box">
+                        <div class="stream-crops-header">
+                            <span>切片预览 (#${validCount})</span>
+                        </div>
+                        <div class="stream-crop-strip" id="crop-strip-${fileId}">
+                            <div class="empty-hint">暂无检出子图</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stream-page-right">
+                    <div class="ctrl-group">
+                        <div class="ctrl-label-row"><span>背景模式</span></div>
+                        <div class="radio-row">
+                            <label><input type="radio" name="bgType-${fileId}" value="light" ${item.params.bg_type === 'light' ? 'checked' : ''}> 浅色白底</label>
+                            <label><input type="radio" name="bgType-${fileId}" value="dark" ${item.params.bg_type === 'dark' ? 'checked' : ''}> 深色黑底</label>
+                        </div>
+                    </div>
+                    <div class="ctrl-group">
+                        <div class="ctrl-label-row"><span>高斯滤波降噪</span></div>
+                        <select id="blurKernel-${fileId}" class="select-input">
+                            <option value="1" ${item.params.blur_kernel == 1 ? 'selected' : ''}>1 (无模糊)</option>
+                            <option value="3" ${item.params.blur_kernel == 3 ? 'selected' : ''}>3 (推荐)</option>
+                            <option value="5" ${item.params.blur_kernel == 5 ? 'selected' : ''}>5</option>
+                            <option value="7" ${item.params.blur_kernel == 7 ? 'selected' : ''}>7</option>
+                            <option value="9" ${item.params.blur_kernel == 9 ? 'selected' : ''}>9</option>
+                            <option value="15" ${item.params.blur_kernel == 15 ? 'selected' : ''}>15</option>
+                        </select>
+                    </div>
+                    <div class="ctrl-group">
+                        <div class="ctrl-label-row"><span>二值化算法</span></div>
+                        <select id="threshMode-${fileId}" class="select-input">
+                            <option value="fixed" ${item.params.threshold_mode === 'fixed' ? 'selected' : ''}>固定阈值 (手动微调)</option>
+                            <option value="otsu" ${item.params.threshold_mode === 'otsu' ? 'selected' : ''}>Otsu 大津法 (自动双峰)</option>
+                            <option value="adaptive" ${item.params.threshold_mode === 'adaptive' ? 'selected' : ''}>自适应局部高斯</option>
+                        </select>
+                    </div>
+                    <div class="ctrl-group">
+                        <div class="ctrl-label-row">
+                            <span>二值化阈值</span>
+                            <span id="threshValLabel-${fileId}" class="val-badge">${threshBadgeText}</span>
+                        </div>
+                        <div class="ctrl-input-row">
+                            <input type="range" id="threshold-${fileId}" min="0" max="255" value="${item.params.threshold}" class="range-input" ${threshDisabledAttr} ${threshDisabledStyle}>
+                            <input type="number" id="thresholdNum-${fileId}" min="0" max="255" value="${item.params.threshold}" class="num-input" ${threshDisabledAttr} ${threshDisabledStyle}>
+                            <button id="estimateThreshBtn-${fileId}" class="btn-mini" title="估算最佳阈值" ${threshDisabledAttr} ${threshDisabledStyle}>估算</button>
+                        </div>
+                    </div>
+                    <div class="ctrl-group">
+                        <div class="ctrl-label-row"><span>形态学平滑 (px)</span></div>
+                        <div class="ctrl-input-row">
+                            <input type="range" id="morphSizeRange-${fileId}" min="0" max="15" value="${item.params.morph_size || 0}" class="range-input">
+                            <input type="number" id="morphSizeNum-${fileId}" min="0" max="15" value="${item.params.morph_size || 0}" class="num-input">
+                        </div>
+                    </div>
+                    <div class="ctrl-group">
+                        <label class="checkbox-row">
+                            <input type="checkbox" id="autoRotate-${fileId}" ${item.params.auto_rotate ? 'checked' : ''}>
+                            <span>自动倾斜矫正 (摆正照片)</span>
+                        </label>
+                    </div>
+                    <div class="ctrl-group">
+                        <div class="ctrl-label-row"><span>最小面积占比 (%)</span></div>
+                        <div class="ctrl-input-row">
+                            <input type="range" id="minAreaRange-${fileId}" min="0.01" max="20" step="0.05" value="${item.params.min_area_pct}" class="range-input">
+                            <input type="number" id="minArea-${fileId}" min="0.01" max="100" step="0.05" value="${item.params.min_area_pct}" class="num-input" style="width: 54px;">
+                        </div>
+                    </div>
+                    <div class="ctrl-group">
+                        <div class="ctrl-label-row"><span>最大面积占比 (%)</span></div>
+                        <div class="ctrl-input-row">
+                            <input type="range" id="maxAreaRange-${fileId}" min="5" max="100" step="0.5" value="${item.params.max_area_pct}" class="range-input">
+                            <input type="number" id="maxArea-${fileId}" min="0.1" max="100" step="0.5" value="${item.params.max_area_pct}" class="num-input" style="width: 54px;">
+                        </div>
+                    </div>
+                    <div class="ctrl-group">
+                        <div class="ctrl-label-row"><span>外扩边缘 (px)</span></div>
+                        <div class="ctrl-input-row">
+                            <input type="range" id="padding-${fileId}" min="-50" max="50" value="${item.params.padding}" class="range-input">
+                            <input type="number" id="paddingNum-${fileId}" min="-50" max="50" value="${item.params.padding}" class="num-input">
+                        </div>
+                    </div>
+                    <div class="tool-divider"></div>
+                    <div class="tool-grid full">
+                        <button id="autoOrientBtn-${fileId}" class="btn-action">自动纠正所有朝向</button>
+                    </div>
+                    <div class="tool-grid">
+                        <button id="mergeCropsBtn-${fileId}" class="btn-tool" title="合并选中的多个框 (快捷键: M)">合并多框 (M)</button>
+                        <button id="selectAllBtn-${fileId}" class="btn-tool" title="全选当前图片的所有裁剪框 (快捷键: Ctrl+A)">全选 (Ctrl+A)</button>
+                    </div>
+                    <div class="tool-grid">
+                        <button id="delCropBtn-${fileId}" class="btn-tool danger" title="删除选中的裁剪框 (快捷键: Delete)">删除选中框</button>
+                        <button id="reDetectBtn-${fileId}" class="btn-tool" title="重新自动检测">重新检测</button>
+                    </div>
+                    <button id="syncParamsBtn-${fileId}" class="btn-secondary" style="margin-top: 4px;">同步此图参数到所有图片</button>
+                </div>
+            `;
+
+            pageEl.querySelectorAll('.card-tab-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const mode = btn.getAttribute('data-mode');
+                    selectFile(fileId, false);
+                    setFileDebugMode(fileId, mode);
+                });
+            });
+
+            pageEl.addEventListener('click', () => {
+                if (currentFileId !== fileId) {
+                    selectFile(fileId, false);
+                }
+            });
+
+            streamContainer.appendChild(pageEl);
+
+            const canvas = document.getElementById(`canvas-${fileId}`);
+            if (canvas) {
+                bindCanvasEvents(canvas, fileId);
+            }
+            bindCardEvents(fileId);
+        } else {
+            const numEl = pageEl.querySelector('.stream-page-num');
+            if (numEl) numEl.innerText = `[#${index + 1}]`;
+            pageEl.querySelectorAll('.card-tab-btn').forEach(btn => {
+                if (btn.getAttribute('data-mode') === itemMode) btn.classList.add('active');
+                else btn.classList.remove('active');
+            });
+            const cropHeader = pageEl.querySelector('.stream-crops-header span');
+            if (cropHeader) cropHeader.innerText = `切片预览 (#${validCount})`;
+            if (fileId === currentFileId) {
+                pageEl.classList.add('active');
+            } else {
+                pageEl.classList.remove('active');
+            }
+        }
+
+        drawCanvas(fileId);
+        renderCropPreviews(fileId);
+    });
+
+    // 清除无用卡片
+    const allCards = streamContainer.querySelectorAll('.stream-page');
+    allCards.forEach(card => {
+        const fid = card.dataset.fileId;
+        if (!filesMap[fid]) card.remove();
     });
 }
 
-function selectFile(fileId) {
+function bindCardEvents(fileId) {
+    const fileData = filesMap[fileId];
+    if (!fileData) return;
+
+    const threshRange = document.getElementById(`threshold-${fileId}`);
+    const threshNum = document.getElementById(`thresholdNum-${fileId}`);
+    const threshLabel = document.getElementById(`threshValLabel-${fileId}`);
+    const threshMode = document.getElementById(`threshMode-${fileId}`);
+    const estimateBtn = document.getElementById(`estimateThreshBtn-${fileId}`);
+    const morphRange = document.getElementById(`morphSizeRange-${fileId}`);
+    const morphNum = document.getElementById(`morphSizeNum-${fileId}`);
+    const morphLabel = document.getElementById(`morphValLabel-${fileId}`);
+    const autoRot = document.getElementById(`autoRotate-${fileId}`);
+    const blur = document.getElementById(`blurKernel-${fileId}`);
+    const minRange = document.getElementById(`minAreaRange-${fileId}`);
+    const minInput = document.getElementById(`minArea-${fileId}`);
+    const minLabel = document.getElementById(`minAreaValLabel-${fileId}`);
+    const maxRange = document.getElementById(`maxAreaRange-${fileId}`);
+    const maxInput = document.getElementById(`maxArea-${fileId}`);
+    const maxLabel = document.getElementById(`maxAreaValLabel-${fileId}`);
+    const padRange = document.getElementById(`padding-${fileId}`);
+    const padNum = document.getElementById(`paddingNum-${fileId}`);
+    const padLabel = document.getElementById(`paddingValLabel-${fileId}`);
+    const bgRadios = document.getElementsByName(`bgType-${fileId}`);
+
+    let localDebounce = null;
+    const triggerUpdate = (isSlider = false) => {
+        clearTimeout(localDebounce);
+        localDebounce = setTimeout(() => {
+            requestPreview(fileId, false);
+        }, isSlider ? 100 : 20);
+    };
+
+    if (threshRange && threshNum && threshLabel) {
+        threshRange.addEventListener('input', (e) => {
+            const v = parseInt(e.target.value) || 0;
+            threshNum.value = v;
+            threshLabel.innerText = v;
+            fileData.params.threshold = v;
+            triggerUpdate(true);
+        });
+        threshNum.addEventListener('change', (e) => {
+            const v = Math.max(0, Math.min(255, parseInt(e.target.value) || 0));
+            threshRange.value = v;
+            threshNum.value = v;
+            threshLabel.innerText = v;
+            fileData.params.threshold = v;
+            requestPreview(fileId, false);
+        });
+    }
+
+    if (estimateBtn) {
+        estimateBtn.addEventListener('click', async () => {
+            try {
+                estimateBtn.disabled = true;
+                estimateBtn.innerText = '…';
+                const res = await fetch('/api/estimate_threshold', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        file_id: fileId,
+                        bg_type: fileData.params.bg_type
+                    })
+                });
+                const data = await res.json();
+                if (data.threshold !== undefined) {
+                    fileData.params.threshold = data.threshold;
+                    if (threshRange) threshRange.value = data.threshold;
+                    if (threshNum) threshNum.value = data.threshold;
+                    if (threshLabel) threshLabel.innerText = data.threshold;
+                    log(`[${fileData.name}] 大津法估算阈值: ${data.threshold}`);
+                    requestPreview(fileId, false);
+                }
+            } catch (err) {
+                log(`估算阈值失败: ${err}`);
+            } finally {
+                estimateBtn.disabled = false;
+                estimateBtn.innerText = '估算';
+            }
+        });
+    }
+
+    const updateThreshModeUi = (mode) => {
+        const isFixed = (mode === 'fixed');
+        if (threshRange) {
+            threshRange.disabled = !isFixed;
+            threshRange.style.opacity = isFixed ? '1' : '0.4';
+            threshRange.style.cursor = isFixed ? 'pointer' : 'not-allowed';
+        }
+        if (threshNum) {
+            threshNum.disabled = !isFixed;
+            threshNum.style.opacity = isFixed ? '1' : '0.4';
+            threshNum.style.cursor = isFixed ? 'text' : 'not-allowed';
+        }
+        if (estimateBtn) {
+            estimateBtn.disabled = !isFixed;
+            estimateBtn.style.opacity = isFixed ? '1' : '0.4';
+            estimateBtn.style.pointerEvents = isFixed ? 'auto' : 'none';
+        }
+        if (threshLabel) {
+            if (mode === 'otsu') {
+                threshLabel.innerText = `${fileData.params.threshold} (自动)`;
+            } else if (mode === 'adaptive') {
+                threshLabel.innerText = '自适应';
+            } else {
+                threshLabel.innerText = fileData.params.threshold;
+            }
+        }
+    };
+    updateThreshModeUi(fileData.params.threshold_mode || 'fixed');
+
+    if (threshMode) {
+        threshMode.addEventListener('change', (e) => {
+            const m = e.target.value;
+            fileData.params.threshold_mode = m;
+            updateThreshModeUi(m);
+            log(`[${fileData.name}] 切换二值化算法: ${e.target.options[e.target.selectedIndex].text}`);
+            requestPreview(fileId, false);
+        });
+    }
+
+    if (blur) {
+        blur.addEventListener('change', (e) => {
+            fileData.params.blur_kernel = parseInt(e.target.value) || 3;
+            requestPreview(fileId, false);
+        });
+    }
+
+    bgRadios.forEach(r => {
+        r.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                fileData.params.bg_type = e.target.value;
+                log(`[${fileData.name}] 切换背景色模式: ${e.target.value}`);
+                requestPreview(fileId, false);
+            }
+        });
+    });
+
+    if (morphRange && morphNum && morphLabel) {
+        morphRange.addEventListener('input', (e) => {
+            const v = parseInt(e.target.value) || 0;
+            morphNum.value = v;
+            morphLabel.innerText = v + ' px';
+            fileData.params.morph_size = v;
+            triggerUpdate(true);
+        });
+        morphNum.addEventListener('change', (e) => {
+            const v = Math.max(0, Math.min(15, parseInt(e.target.value) || 0));
+            morphRange.value = v;
+            morphNum.value = v;
+            morphLabel.innerText = v + ' px';
+            fileData.params.morph_size = v;
+            requestPreview(fileId, false);
+        });
+    }
+
+    if (autoRot) {
+        autoRot.addEventListener('change', (e) => {
+            fileData.params.auto_rotate = e.target.checked;
+            drawCanvas(fileId);
+            renderCropPreviews(fileId);
+        });
+    }
+
+    if (minRange && minInput && minLabel) {
+        minRange.addEventListener('input', (e) => {
+            const v = parseFloat(e.target.value) || 0.05;
+            minInput.value = v;
+            minLabel.innerText = v.toFixed(2) + '%';
+            fileData.params.min_area_pct = v;
+            triggerUpdate(true);
+        });
+        minInput.addEventListener('change', (e) => {
+            const v = parseFloat(e.target.value) || 0.05;
+            minRange.value = Math.min(20, v);
+            minLabel.innerText = v.toFixed(2) + '%';
+            fileData.params.min_area_pct = v;
+            requestPreview(fileId, false);
+        });
+    }
+
+    if (maxRange && maxInput && maxLabel) {
+        maxRange.addEventListener('input', (e) => {
+            const v = parseFloat(e.target.value) || 80.0;
+            maxInput.value = v;
+            maxLabel.innerText = v.toFixed(1) + '%';
+            fileData.params.max_area_pct = v;
+            triggerUpdate(true);
+        });
+        maxInput.addEventListener('change', (e) => {
+            const v = parseFloat(e.target.value) || 80.0;
+            maxRange.value = v;
+            maxLabel.innerText = v.toFixed(1) + '%';
+            fileData.params.max_area_pct = v;
+            requestPreview(fileId, false);
+        });
+    }
+
+    if (padRange && padNum && padLabel) {
+        padRange.addEventListener('input', (e) => {
+            const v = parseInt(e.target.value) || 0;
+            padNum.value = v;
+            padLabel.innerText = v + ' px';
+            fileData.params.padding = v;
+            triggerUpdate(true);
+        });
+        padNum.addEventListener('change', (e) => {
+            const v = parseInt(e.target.value) || 0;
+            padRange.value = v;
+            padNum.value = v;
+            padLabel.innerText = v + ' px';
+            fileData.params.padding = v;
+            requestPreview(fileId, false);
+        });
+    }
+
+    const orientBtn = document.getElementById(`autoOrientBtn-${fileId}`);
+    if (orientBtn) {
+        orientBtn.addEventListener('click', () => {
+            selectFile(fileId, false);
+            autoOrientAllCrops();
+        });
+    }
+
+    const mergeBtn = document.getElementById(`mergeCropsBtn-${fileId}`);
+    if (mergeBtn) {
+        mergeBtn.addEventListener('click', () => {
+            selectFile(fileId, false);
+            mergeSelectedCrops();
+        });
+    }
+
+    const selAllBtn = document.getElementById(`selectAllBtn-${fileId}`);
+    if (selAllBtn) {
+        selAllBtn.addEventListener('click', () => {
+            selectFile(fileId, false);
+            selectAllCrops();
+        });
+    }
+
+    const splitVBtn = document.getElementById(`splitVCropBtn-${fileId}`);
+    if (splitVBtn) {
+        splitVBtn.addEventListener('click', () => {
+            selectFile(fileId, false);
+            splitSelectedCrop('v');
+        });
+    }
+
+    const splitHBtn = document.getElementById(`splitHCropBtn-${fileId}`);
+    if (splitHBtn) {
+        splitHBtn.addEventListener('click', () => {
+            selectFile(fileId, false);
+            splitSelectedCrop('h');
+        });
+    }
+
+    const delBtn = document.getElementById(`delCropBtn-${fileId}`);
+    if (delBtn) {
+        delBtn.addEventListener('click', () => {
+            selectFile(fileId, false);
+            deleteSelectedCrop();
+        });
+    }
+
+    const reDetBtn = document.getElementById(`reDetectBtn-${fileId}`);
+    if (reDetBtn) {
+        reDetBtn.addEventListener('click', () => {
+            selectFile(fileId, false);
+            log(`[${fileData.name}] 重新执行自动检测...`);
+            requestPreview(fileId, false);
+        });
+    }
+
+    const syncBtn = document.getElementById(`syncParamsBtn-${fileId}`);
+    if (syncBtn) {
+        syncBtn.addEventListener('click', () => {
+            const srcParams = { ...fileData.params };
+            Object.keys(filesMap).forEach(fid => {
+                if (fid !== fileId) {
+                    filesMap[fid].params = { ...srcParams };
+                    syncCardControls(fid, srcParams);
+                    requestPreview(fid, false);
+                }
+            });
+            log(`已将 [${fileData.name}] 的参数同步到其他所有图片。`);
+        });
+    }
+}
+
+function syncCardControls(fileId, params) {
+    if (!params) return;
+    const bgRadios = document.getElementsByName(`bgType-${fileId}`);
+    bgRadios.forEach(r => { r.checked = (r.value === params.bg_type); });
+    const blur = document.getElementById(`blurKernel-${fileId}`);
+    if (blur) blur.value = params.blur_kernel;
+    const threshMode = document.getElementById(`threshMode-${fileId}`);
+    if (threshMode) threshMode.value = params.threshold_mode || 'fixed';
+    const isFixed = (params.threshold_mode === 'fixed');
+    const threshRange = document.getElementById(`threshold-${fileId}`);
+    if (threshRange) {
+        threshRange.value = params.threshold;
+        threshRange.disabled = !isFixed;
+        threshRange.style.opacity = isFixed ? '1' : '0.4';
+        threshRange.style.cursor = isFixed ? 'pointer' : 'not-allowed';
+    }
+    const threshNum = document.getElementById(`thresholdNum-${fileId}`);
+    if (threshNum) {
+        threshNum.value = params.threshold;
+        threshNum.disabled = !isFixed;
+        threshNum.style.opacity = isFixed ? '1' : '0.4';
+    }
+    const estimateBtn = document.getElementById(`estimateThreshBtn-${fileId}`);
+    if (estimateBtn) {
+        estimateBtn.disabled = !isFixed;
+        estimateBtn.style.opacity = isFixed ? '1' : '0.4';
+    }
+    const threshLabel = document.getElementById(`threshValLabel-${fileId}`);
+    if (threshLabel) {
+        if (params.threshold_mode === 'otsu') {
+            threshLabel.innerText = `${params.threshold} (自动)`;
+        } else if (params.threshold_mode === 'adaptive') {
+            threshLabel.innerText = '自适应';
+        } else {
+            threshLabel.innerText = params.threshold;
+        }
+    }
+    const morphRange = document.getElementById(`morphSizeRange-${fileId}`);
+    if (morphRange) morphRange.value = params.morph_size || 0;
+    const morphNum = document.getElementById(`morphSizeNum-${fileId}`);
+    if (morphNum) morphNum.value = params.morph_size || 0;
+    const morphLabel = document.getElementById(`morphValLabel-${fileId}`);
+    if (morphLabel) morphLabel.innerText = (params.morph_size || 0) + ' px';
+    const autoRot = document.getElementById(`autoRotate-${fileId}`);
+    if (autoRot) autoRot.checked = !!params.auto_rotate;
+    const minRange = document.getElementById(`minAreaRange-${fileId}`);
+    if (minRange) minRange.value = params.min_area_pct;
+    const minInput = document.getElementById(`minArea-${fileId}`);
+    if (minInput) minInput.value = params.min_area_pct;
+    const minLabel = document.getElementById(`minAreaValLabel-${fileId}`);
+    if (minLabel) minLabel.innerText = Number(params.min_area_pct).toFixed(2) + '%';
+    const maxRange = document.getElementById(`maxAreaRange-${fileId}`);
+    if (maxRange) maxRange.value = params.max_area_pct;
+    const maxInput = document.getElementById(`maxArea-${fileId}`);
+    if (maxInput) maxInput.value = params.max_area_pct;
+    const maxLabel = document.getElementById(`maxAreaValLabel-${fileId}`);
+    if (maxLabel) maxLabel.innerText = Number(params.max_area_pct).toFixed(1) + '%';
+    const padRange = document.getElementById(`padding-${fileId}`);
+    if (padRange) padRange.value = params.padding;
+    const padNum = document.getElementById(`paddingNum-${fileId}`);
+    if (padNum) padNum.value = params.padding;
+    const padLabel = document.getElementById(`paddingValLabel-${fileId}`);
+    if (padLabel) padLabel.innerText = params.padding + ' px';
+}
+
+function selectFile(fileId, shouldScroll = false) {
     if (!filesMap[fileId]) return;
     currentFileId = fileId;
     const fileData = filesMap[fileId];
@@ -445,56 +1083,36 @@ function selectFile(fileId) {
         activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
+    document.querySelectorAll('.stream-page').forEach(el => el.classList.remove('active'));
+    const activePage = document.getElementById(`page-${fileId}`);
+    if (activePage) {
+        activePage.classList.add('active');
+        if (shouldScroll) {
+            activePage.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
+
     dropZone.style.display = 'none';
-    mainCanvas.style.display = 'block';
+    if (streamContainer) streamContainer.style.display = 'flex';
+
+    const mode = fileData.debugMode || 'original';
+    currentDebugMode = mode;
+    tabItems.forEach(t => {
+        if (t.getAttribute('data-mode') === mode) t.classList.add('active');
+        else t.classList.remove('active');
+    });
 
     fileMeta.innerText = `当前: ${fileData.name} (${fileData.width}×${fileData.height})`;
     viewportInfo.innerText = `[${fileData.name}] ${fileData.width}×${fileData.height} | 检出 ${fileData.rects.length} 张`;
 
-    // 刷新右侧参数检查器
-    syncInspectorControls(fileData.params);
-
     if (!fileData.detected) {
         requestPreview(fileId);
-    } else if (currentDebugMode !== 'original') {
+    } else if (mode !== 'original' && !fileData.debugImgSrc) {
         requestPreview(fileId);
     } else {
-        drawCanvas();
-        renderCropPreviews();
+        drawCanvas(fileId);
+        renderCropPreviews(fileId);
     }
-}
-
-// 将指定参数同步到右侧面板
-function syncInspectorControls(params) {
-    if (!params) return;
-
-    bgRadios.forEach(r => {
-        r.checked = (r.value === params.bg_type);
-    });
-    blurSelect.value = params.blur_kernel;
-    if (threshModeSelect) threshModeSelect.value = params.threshold_mode || 'fixed';
-
-    threshRange.value = params.threshold;
-    threshNum.value = params.threshold;
-    threshValLabel.innerText = params.threshold;
-
-    if (morphSizeRange) morphSizeRange.value = params.morph_size || 0;
-    if (morphSizeNum) morphSizeNum.value = params.morph_size || 0;
-    if (morphValLabel) morphValLabel.innerText = (params.morph_size || 0) + ' px';
-
-    autoRotateCheck.checked = !!params.auto_rotate;
-
-    minAreaRange.value = params.min_area_pct;
-    minAreaInput.value = params.min_area_pct;
-    minAreaValLabel.innerText = Number(params.min_area_pct).toFixed(2) + '%';
-
-    maxAreaRange.value = params.max_area_pct;
-    maxAreaInput.value = params.max_area_pct;
-    maxAreaValLabel.innerText = Number(params.max_area_pct).toFixed(1) + '%';
-
-    paddingRange.value = params.padding;
-    paddingNum.value = params.padding;
-    paddingValLabel.innerText = params.padding + ' px';
 }
 
 function mergeRectsPreserveFlip(oldRects, newRects) {
@@ -528,7 +1146,7 @@ function requestPreview(fileId, skipCropPreviews = false) {
         session_id: sessionId,
         file_id: targetId,
         ...fileData.params,
-        debug_mode: currentDebugMode
+        debug_mode: fileData.debugMode || 'original'
     };
 
     fetch('/api/preview', {
@@ -558,11 +1176,14 @@ function requestPreview(fileId, skipCropPreviews = false) {
         const validCount = (fileData.rects || []).filter(r => !r.excluded).length;
         const badge = document.getElementById(`badge-${targetId}`);
         if (badge) badge.innerText = validCount;
+        const pageBadge = document.getElementById(`page-badge-${targetId}`);
+        if (pageBadge) pageBadge.innerText = `检出 ${validCount} 张照片`;
+
+        drawCanvas(targetId);
+        if (!skipCropPreviews) renderCropPreviews(targetId);
 
         if (targetId === currentFileId) {
             viewportInfo.innerText = `[${fileData.name}] ${fileData.width}×${fileData.height} | 检出 ${validCount} 张`;
-            drawCanvas();
-            if (!skipCropPreviews) renderCropPreviews();
         }
 
         updateBatchSummary();
@@ -599,12 +1220,16 @@ function silentRequestPreview(fileId) {
 
             const badge = document.getElementById(`badge-${fileId}`);
             if (badge) badge.innerText = data.rects.length;
+            const pageBadge = document.getElementById(`page-badge-${fileId}`);
+            if (pageBadge) pageBadge.innerText = `检出 ${data.rects.length} 张照片`;
 
-            updateBatchSummary();
+            drawCanvas(fileId);
+            renderCropPreviews(fileId);
+
             if (fileId === currentFileId) {
-                drawCanvas();
-                renderCropPreviews();
+                viewportInfo.innerText = `[${fileData.name}] ${fileData.width}×${fileData.height} | 检出 ${data.rects.length} 张`;
             }
+            updateBatchSummary();
             log(`[${fileData.name}] 检出有效子图数: ${data.rects.length}`);
         }
     });
@@ -679,23 +1304,35 @@ function formatOrientLabel(orient) {
     return deg ? `${deg}°` : '';
 }
 
-function renderCropPreviews() {
-    if (!currentFileId || !filesMap[currentFileId]) return;
-    const fileData = filesMap[currentFileId];
+function renderCropPreviews(targetFileId) {
+    const fileId = targetFileId || currentFileId;
+    if (!fileId || !filesMap[fileId]) return;
+    const fileData = filesMap[fileId];
     const rects = fileData.rects || [];
+    const isCurrentActive = (fileId === currentFileId);
+
+    // 清空或初始化卡片内切片容器
+    const cardStrip = document.getElementById(`crop-strip-${fileId}`);
+    if (cardStrip) {
+        if (rects.length === 0) {
+            cardStrip.innerHTML = '<div class="empty-hint">暂无检出子图</div>';
+        } else {
+            cardStrip.innerHTML = '';
+        }
+    }
 
     if (rects.length === 0) {
-        cropPreviewStrip.innerHTML = '<div class="empty-hint">暂无检出子图</div>';
-        if (multiCountBadge) multiCountBadge.innerText = '已选 0 个';
+        const cardMultiBadge = document.getElementById(`multiCountBadge-${fileId}`);
+        if (cardMultiBadge) cardMultiBadge.innerText = '已选 0 个';
         return;
     }
 
     const selIndices = fileData.selectedCropIndices || new Set();
-    if (multiCountBadge) multiCountBadge.innerText = `已选 ${selIndices.size} 个`;
+    const cardMultiBadge = document.getElementById(`multiCountBadge-${fileId}`);
+    if (cardMultiBadge) cardMultiBadge.innerText = `已选 ${selIndices.size} 个`;
 
     const img = new Image();
     img.onload = () => {
-        cropPreviewStrip.innerHTML = '';
         const autoRotate = !!fileData.params.auto_rotate;
 
         rects.forEach((rect, index) => {
@@ -703,12 +1340,13 @@ function renderCropPreviews() {
             const isExcluded = !!rect.excluded;
             const orient = getRectOrient(rect);
             const orientLabel = formatOrientLabel(orient);
-            const item = document.createElement('div');
-            item.className = 'crop-preview-item' + (isSelected ? ' selected' : '') + (isExcluded ? ' excluded' : '');
             const src = buildCropPreviewDataUrl(img, rect, autoRotate, fileData.params.bg_type);
             const badgeHtml = isExcluded
                 ? `<span class="flip-badge" style="background:#ff3b30;color:#fff;">排除</span>`
                 : (orientLabel ? `<span class="flip-badge">${orientLabel}</span>` : '');
+
+            const item = document.createElement('div');
+            item.className = 'crop-preview-item' + (isSelected ? ' selected' : '') + (isExcluded ? ' excluded' : '');
             item.innerHTML = `
                 ${badgeHtml}
                 <img alt="crop ${index + 1}" src="${src}">
@@ -716,9 +1354,15 @@ function renderCropPreviews() {
             `;
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
+                if (currentFileId !== fileId) {
+                    selectFile(fileId, false);
+                }
                 selectCrop(index, e.shiftKey || e.ctrlKey || e.metaKey);
             });
-            cropPreviewStrip.appendChild(item);
+
+            if (cardStrip) {
+                cardStrip.appendChild(item);
+            }
         });
     };
     img.src = fileData.thumbnail;
@@ -744,10 +1388,11 @@ function selectCrop(index, isMulti = false) {
         fileData.selectedCropIndex = index;
     }
 
-    if (multiCountBadge) multiCountBadge.innerText = `已选 ${fileData.selectedCropIndices.size} 个`;
+    const cardMultiBadge = document.getElementById(`multiCountBadge-${currentFileId}`);
+    if (cardMultiBadge) cardMultiBadge.innerText = `已选 ${fileData.selectedCropIndices.size} 个`;
 
-    drawCanvas();
-    renderCropPreviews();
+    drawCanvas(currentFileId);
+    renderCropPreviews(currentFileId);
 }
 
 const MAX_UNDO_STACK = 40;
@@ -826,12 +1471,13 @@ function updateFileUiAfterRectsChange() {
     const badge = document.getElementById(`badge-${currentFileId}`);
     if (badge) badge.innerText = validCount;
 
-    if (multiCountBadge) multiCountBadge.innerText = `已选 ${(fileData.selectedCropIndices ? fileData.selectedCropIndices.size : 0)} 个`;
-    viewportInfo.innerText = `[${fileData.name}] ${fileData.width}×${fileData.height} | 检出 ${validCount} 张`;
+    if (viewportInfo) {
+        viewportInfo.innerText = `[${fileData.name}] ${fileData.width}×${fileData.height}`;
+    }
 
     updateBatchSummary();
-    drawCanvas();
-    renderCropPreviews();
+    drawCanvas(currentFileId);
+    renderCropPreviews(currentFileId);
 }
 
 function rotateSelectedCrop(deltaDeg) {
@@ -1040,9 +1686,10 @@ async function autoOrientAllCrops() {
     const rects = fileData.rects || [];
     if (rects.length === 0) return;
 
-    if (autoOrientBtn) {
-        autoOrientBtn.disabled = true;
-        autoOrientBtn.innerText = '正在智能预判朝向…';
+    const cardOrientBtn = document.getElementById(`autoOrientBtn-${currentFileId}`);
+    if (cardOrientBtn) {
+        cardOrientBtn.disabled = true;
+        cardOrientBtn.innerText = '正在智能预判朝向…';
     }
 
     try {
@@ -1068,9 +1715,9 @@ async function autoOrientAllCrops() {
     } catch (err) {
         log(`智能朝向预判异常: ${err}`);
     } finally {
-        if (autoOrientBtn) {
-            autoOrientBtn.disabled = false;
-            autoOrientBtn.innerText = '自动纠正所有朝向';
+        if (cardOrientBtn) {
+            cardOrientBtn.disabled = false;
+            cardOrientBtn.innerText = '自动纠正所有朝向';
         }
     }
 }
@@ -1265,13 +1912,17 @@ function getRotateCursor(cx, cy, x, y) {
     return ROTATE_CURSORS[snap] || ROTATE_CURSORS[0];
 }
 
-function hitTest(mx, my) {
-    if (!currentFileId || !filesMap[currentFileId]) return { type: 'empty' };
-    const fileData = filesMap[currentFileId];
+let activeCanvas = null;
+
+function hitTest(mx, my, fileId, canvas) {
+    const fid = fileId || currentFileId;
+    if (!fid || !filesMap[fid]) return { type: 'empty' };
+    const fileData = filesMap[fid];
     const rects = fileData.rects || [];
 
-    const cssRect = mainCanvas.getBoundingClientRect();
-    const scale = mainCanvas.width / (cssRect.width || mainCanvas.width);
+    const targetCanvas = canvas || activeCanvas || document.getElementById(`canvas-${fid}`) || mainCanvas;
+    const cssRect = targetCanvas.getBoundingClientRect();
+    const scale = targetCanvas.width / (cssRect.width || targetCanvas.width || 1);
     const handleRadius = Math.max(10, Math.min(26, 12 * scale));
     const rotateMargin = 32 * scale;
 
@@ -1346,13 +1997,12 @@ function getHandleCursor(info, handleIndex) {
     return 'ew-resize';
 }
 
-mainCanvas.addEventListener('mousedown', (e) => {
-    if (e.button !== 0 || !currentFileId || !filesMap[currentFileId]) return;
-
-    const fileData = filesMap[currentFileId];
-    const { x, y } = getCanvasCoords(mainCanvas, e);
-    const hit = hitTest(x, y);
-    const pendingSnapshot = createSnapshot(currentFileId);
+function handleCanvasMouseDown(e, fileId, canvas) {
+    if (e.button !== 0 || !filesMap[fileId]) return;
+    const fileData = filesMap[fileId];
+    const { x, y } = getCanvasCoords(canvas, e);
+    const hit = hitTest(x, y, fileId, canvas);
+    const pendingSnapshot = createSnapshot(fileId);
 
     const isShift = e.shiftKey;
     const isAlt = e.altKey;
@@ -1418,8 +2068,8 @@ mainCanvas.addEventListener('mousedown', (e) => {
             }
         }
 
-        drawCanvas();
-        renderCropPreviews();
+        drawCanvas(fileId);
+        renderCropPreviews(fileId);
 
         const initialMulti = {};
         fileData.selectedCropIndices.forEach(idx => {
@@ -1455,8 +2105,8 @@ mainCanvas.addEventListener('mousedown', (e) => {
             if (fileData.selectedCropIndices.size > 0) {
                 fileData.selectedCropIndices.clear();
                 fileData.selectedCropIndex = -1;
-                drawCanvas();
-                renderCropPreviews();
+                drawCanvas(fileId);
+                renderCropPreviews(fileId);
             }
             transformState = {
                 mode: 'drawing_new',
@@ -1470,42 +2120,56 @@ mainCanvas.addEventListener('mousedown', (e) => {
             };
         }
     }
-});
+}
 
-mainCanvas.addEventListener('mousemove', (e) => {
-    if (!currentFileId || !filesMap[currentFileId]) return;
-    const { x, y } = getCanvasCoords(mainCanvas, e);
+function bindCanvasEvents(canvas, fileId) {
+    if (!canvas || canvas._hasBound) return;
+    canvas._hasBound = true;
 
-    if (transformState.mode === 'none') {
-        const hit = hitTest(x, y);
-        if (e.altKey) {
-            mainCanvas.style.cursor = 'crosshair';
-        } else if (hit.type === 'handle') {
-            mainCanvas.style.cursor = getHandleCursor(hit.info, hit.index);
-        } else if (hit.type === 'rotate') {
-            mainCanvas.style.cursor = getRotateCursor(hit.cx, hit.cy, x, y);
-        } else if (hit.type === 'inside' || hit.type === 'other_rect') {
-            mainCanvas.style.cursor = 'move';
-        } else {
-            mainCanvas.style.cursor = 'default';
+    canvas.addEventListener('mousedown', (e) => {
+        activeCanvas = canvas;
+        if (currentFileId !== fileId) {
+            selectFile(fileId, false);
         }
-    }
-});
+        handleCanvasMouseDown(e, fileId, canvas);
+    });
 
-mainCanvas.addEventListener('mouseleave', () => {
-    if (transformState.mode === 'none') {
-        mainCanvas.style.cursor = 'default';
-    }
-});
+    canvas.addEventListener('mousemove', (e) => {
+        if (!filesMap[fileId]) return;
+        const { x, y } = getCanvasCoords(canvas, e);
+
+        if (transformState.mode === 'none') {
+            const hit = hitTest(x, y, fileId, canvas);
+            if (e.altKey) {
+                canvas.style.cursor = 'crosshair';
+            } else if (hit.type === 'handle') {
+                canvas.style.cursor = getHandleCursor(hit.info, hit.index);
+            } else if (hit.type === 'rotate') {
+                canvas.style.cursor = getRotateCursor(hit.cx, hit.cy, x, y);
+            } else if (hit.type === 'inside' || hit.type === 'other_rect') {
+                canvas.style.cursor = 'move';
+            } else {
+                canvas.style.cursor = 'default';
+            }
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (transformState.mode === 'none') {
+            canvas.style.cursor = 'default';
+        }
+    });
+}
 
 window.addEventListener('mousemove', (e) => {
     if (!transformState || transformState.mode === 'none' || !currentFileId || !filesMap[currentFileId]) return;
     const fileData = filesMap[currentFileId];
-    let { x, y } = getCanvasCoords(mainCanvas, e);
+    const targetCanvas = activeCanvas || document.getElementById(`canvas-${currentFileId}`) || mainCanvas;
+    let { x, y } = getCanvasCoords(targetCanvas, e);
     const isCtrlPressed = e.ctrlKey || e.metaKey;
 
     if (transformState.mode === 'moving') {
-        mainCanvas.style.cursor = 'move';
+        targetCanvas.style.cursor = 'move';
         const snapped = getEdgeSnap(x, y, isCtrlPressed);
         const dx = snapped.x - transformState.startX;
         const dy = snapped.y - transformState.startY;
@@ -1527,9 +2191,9 @@ window.addEventListener('mousemove', (e) => {
             }
         }
         transformState.hasModified = true;
-        drawCanvas();
+        drawCanvas(currentFileId);
     } else if (transformState.mode === 'resizing') {
-        mainCanvas.style.cursor = getHandleCursor(transformState.initialHandles, transformState.handleIndex);
+        targetCanvas.style.cursor = getHandleCursor(transformState.initialHandles, transformState.handleIndex);
         const snapped = getEdgeSnap(x, y, isCtrlPressed);
         const curX = snapped.x;
         const curY = snapped.y;
@@ -1606,11 +2270,11 @@ window.addEventListener('mousemove', (e) => {
 
             updateRectFromParams(rect, new_cx, new_cy, new_w, new_h, init.angle);
             transformState.hasModified = true;
-            drawCanvas();
+            drawCanvas(currentFileId);
         }
     } else if (transformState.mode === 'rotating') {
         const init = transformState.initialHandles;
-        mainCanvas.style.cursor = getRotateCursor(init.cx, init.cy, x, y);
+        targetCanvas.style.cursor = getRotateCursor(init.cx, init.cy, x, y);
         const rect = fileData.rects[transformState.rectIndex];
         if (rect) {
             const dAng = (Math.atan2(y - init.cy, x - init.cx) - Math.atan2(transformState.startY - init.cy, transformState.startX - init.cx)) * 180 / Math.PI;
@@ -1618,19 +2282,20 @@ window.addEventListener('mousemove', (e) => {
             if (e.shiftKey) new_angle = Math.round(new_angle / 15) * 15;
             updateRectFromParams(rect, init.cx, init.cy, init.w, init.h, new_angle);
             transformState.hasModified = true;
-            drawCanvas();
+            drawCanvas(currentFileId);
         }
     } else if (transformState.mode === 'drawing_new' || transformState.mode === 'marquee_select') {
-        mainCanvas.style.cursor = 'crosshair';
+        targetCanvas.style.cursor = 'crosshair';
         transformState.currentX = x;
         transformState.currentY = y;
-        drawCanvas();
+        drawCanvas(currentFileId);
     }
 });
 
 window.addEventListener('mouseup', (e) => {
     if (!transformState || transformState.mode === 'none' || !currentFileId || !filesMap[currentFileId]) return;
     const fileData = filesMap[currentFileId];
+    const targetCanvas = activeCanvas || document.getElementById(`canvas-${currentFileId}`) || mainCanvas;
 
     if (transformState.mode === 'marquee_select') {
         const x0 = Math.min(transformState.startX, transformState.currentX);
@@ -1651,10 +2316,10 @@ window.addEventListener('mouseup', (e) => {
             updateFileUiAfterRectsChange();
             log(`[${fileData.name}] 矩形多选，当前选中 ${fileData.selectedCropIndices.size} 个框。`);
         } else {
-            drawCanvas();
+            drawCanvas(currentFileId);
         }
     } else if (transformState.mode === 'drawing_new') {
-        const { x, y } = getCanvasCoords(mainCanvas, e);
+        const { x, y } = getCanvasCoords(targetCanvas, e);
         const x0 = Math.min(transformState.startX, x);
         const y0 = Math.min(transformState.startY, y);
         const w0 = Math.abs(x - transformState.startX);
@@ -1687,19 +2352,65 @@ window.addEventListener('mouseup', (e) => {
             updateFileUiAfterRectsChange();
             log(`[${fileData.name}] ${isExclude ? '新建排除区' : '新建框选'} #${fileData.rects.length} (${Math.round(w0)}×${Math.round(h0)})`);
         } else {
-            drawCanvas();
+            drawCanvas(currentFileId);
         }
     } else if (transformState.mode === 'moving' || transformState.mode === 'resizing' || transformState.mode === 'rotating') {
         if (transformState.hasModified && transformState.pendingSnapshot) {
             pushUndoState(currentFileId, transformState.pendingSnapshot);
         }
-        renderCropPreviews();
+        renderCropPreviews(currentFileId);
     } else {
-        renderCropPreviews();
+        renderCropPreviews(currentFileId);
     }
 
     transformState.mode = 'none';
 });
+
+// 监听瀑布流滚动：用户滚轮滑动时自动高亮当前视野中心图片，并联动右侧检查器
+let streamScrollTimer = null;
+if (streamContainer) {
+    streamContainer.addEventListener('scroll', () => {
+        clearTimeout(streamScrollTimer);
+        streamScrollTimer = setTimeout(() => {
+            if (isImporting) return;
+            const containerRect = streamContainer.getBoundingClientRect();
+            const centerY = containerRect.top + containerRect.height / 2;
+
+            const pages = Array.from(streamContainer.querySelectorAll('.stream-page'));
+            let bestPage = null;
+            let minDistance = Infinity;
+
+            pages.forEach(p => {
+                const r = p.getBoundingClientRect();
+                const pageCenterY = r.top + r.height / 2;
+                const dist = Math.abs(pageCenterY - centerY);
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    bestPage = p;
+                }
+            });
+
+            if (bestPage) {
+                const targetId = bestPage.dataset.fileId;
+                if (targetId && targetId !== currentFileId) {
+                    selectFile(targetId, false);
+                }
+            }
+        }, 60);
+    }, { passive: true });
+}
+
+function navigateToSiblingFile(delta) {
+    const sortedIds = getSortedFileIds();
+    if (sortedIds.length <= 1) return;
+    const curIdx = sortedIds.indexOf(currentFileId);
+    let nextIdx = (curIdx === -1 ? 0 : curIdx) + delta;
+    if (nextIdx < 0) nextIdx = 0;
+    if (nextIdx >= sortedIds.length) nextIdx = sortedIds.length - 1;
+    if (nextIdx !== curIdx) {
+        selectFile(sortedIds[nextIdx], true);
+    }
+}
 
 // 快捷键管理
 window.addEventListener('keydown', (e) => {
@@ -1727,6 +2438,23 @@ window.addEventListener('keydown', (e) => {
     }
 
     if (!isCtrl) {
+        if (key === '1' || key === '2' || key === '3') {
+            const modeMap = { '1': 'original', '2': 'threshold', '3': 'blurred' };
+            if (currentFileId) {
+                e.preventDefault();
+                setFileDebugMode(currentFileId, modeMap[key]);
+                return;
+            }
+        }
+        if (key === '[' || key === 'pageup') {
+            e.preventDefault();
+            navigateToSiblingFile(-1);
+            return;
+        } else if (key === ']' || key === 'pagedown') {
+            e.preventDefault();
+            navigateToSiblingFile(1);
+            return;
+        }
         if (key === 'z') {
             e.preventDefault();
             rotateSelectedCrop(-90);
@@ -1774,44 +2502,53 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
-function drawCanvas() {
-    if (!currentFileId || !filesMap[currentFileId]) return;
-    const fileData = filesMap[currentFileId];
+function drawCanvas(targetFileId) {
+    const fileId = targetFileId || currentFileId;
+    if (!fileId || !filesMap[fileId]) return;
+    const fileData = filesMap[fileId];
 
-    const canvasCtx = mainCanvas.getContext('2d');
+    const canvas = document.getElementById(`canvas-${fileId}`) || mainCanvas;
+    if (!canvas) return;
+    const canvasCtx = canvas.getContext('2d');
     const isAutoRotate = !!fileData.params.auto_rotate;
 
-    const imageSrc = currentDebugMode === 'original' ? fileData.thumbnail : fileData.debugImgSrc;
-    if (!imageSrc) return;
+    const fileMode = fileData.debugMode || 'original';
+    const imageSrc = fileMode === 'original' ? fileData.thumbnail : fileData.debugImgSrc;
+    if (!imageSrc) {
+        if (fileMode !== 'original') {
+            requestPreview(fileId);
+        }
+        return;
+    }
 
     const render = (img) => {
-        if (mainCanvas.width !== img.width || mainCanvas.height !== img.height) {
-            mainCanvas.width = img.width;
-            mainCanvas.height = img.height;
+        if (canvas.width !== img.width || canvas.height !== img.height) {
+            canvas.width = img.width;
+            canvas.height = img.height;
         } else {
-            canvasCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+            canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
         }
 
         canvasCtx.imageSmoothingEnabled = true;
         canvasCtx.imageSmoothingQuality = 'high';
         canvasCtx.drawImage(img, 0, 0);
 
-        if (currentDebugMode === 'original') {
+        if (fileMode === 'original') {
             const strokeColor = '#ffff00';
             const selectedColor = '#00e5ff';
             const multiSelectColor = '#29b6f6';
             const rects = fileData.rects || [];
 
-            const calculatedLineWidth = Math.max(2, Math.round(mainCanvas.width / 350));
-            const fontSize = Math.max(12, Math.round(mainCanvas.width / 80));
+            const calculatedLineWidth = Math.max(2, Math.round(canvas.width / 350));
+            const fontSize = Math.max(12, Math.round(canvas.width / 80));
             const paddingOffset = Math.round(fontSize * 0.25);
-            const handlePx = Math.max(8, Math.min(22, Math.round(mainCanvas.width / 140)));
+            const handlePx = Math.max(8, Math.min(22, Math.round(canvas.width / 140)));
 
             const selIndices = fileData.selectedCropIndices || new Set();
 
             rects.forEach((rect, index) => {
-                const isSelected = selIndices.has(index);
-                const isPrimary = (index === fileData.selectedCropIndex);
+                const isSelected = (fileId === currentFileId) && selIndices.has(index);
+                const isPrimary = (fileId === currentFileId) && (index === fileData.selectedCropIndex);
                 const isExcluded = !!rect.excluded;
 
                 let currentStroke = strokeColor;
@@ -1886,7 +2623,7 @@ function drawCanvas() {
                     canvasCtx.fillText(label, rect.x + paddingOffset, rectY + fontSize);
                 }
 
-                if (isPrimary) {
+                if (isPrimary && fileId === currentFileId) {
                     canvasCtx.fillStyle = '#ffffff';
                     canvasCtx.strokeStyle = isExcluded ? '#ff3b30' : '#007acc';
                     canvasCtx.lineWidth = 2;
@@ -1904,7 +2641,7 @@ function drawCanvas() {
                 }
             });
 
-            if (transformState && transformState.mode === 'marquee_select') {
+            if (fileId === currentFileId && transformState && transformState.mode === 'marquee_select') {
                 const x0 = Math.min(transformState.startX, transformState.currentX);
                 const y0 = Math.min(transformState.startY, transformState.currentY);
                 const w0 = Math.abs(transformState.currentX - transformState.startX);
@@ -1918,7 +2655,7 @@ function drawCanvas() {
                 canvasCtx.fillStyle = 'rgba(41, 182, 246, 0.15)';
                 canvasCtx.fillRect(x0, y0, w0, h0);
                 canvasCtx.restore();
-            } else if (transformState && transformState.mode === 'drawing_new') {
+            } else if (fileId === currentFileId && transformState && transformState.mode === 'drawing_new') {
                 const x0 = Math.min(transformState.startX, transformState.currentX);
                 const y0 = Math.min(transformState.startY, transformState.currentY);
                 const w0 = Math.abs(transformState.currentX - transformState.startX);
@@ -1950,246 +2687,6 @@ function drawCanvas() {
     }
 }
 
-// 绑定右侧全局面板事件
-function bindInspectorEvents() {
-    let debounceTimer = null;
-    const triggerUpdate = (skipPreviews = true) => {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-            if (currentFileId) requestPreview(currentFileId, skipPreviews);
-        }, 16);
-    };
-
-    bgRadios.forEach(radio => {
-        radio.addEventListener('change', (e) => {
-            if (!currentFileId || !filesMap[currentFileId]) return;
-            filesMap[currentFileId].params.bg_type = e.target.value;
-            requestPreview(currentFileId, false);
-        });
-    });
-
-    blurSelect.addEventListener('change', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        filesMap[currentFileId].params.blur_kernel = parseInt(e.target.value);
-        requestPreview(currentFileId, false);
-    });
-
-    if (threshModeSelect) {
-        threshModeSelect.addEventListener('change', (e) => {
-            if (!currentFileId || !filesMap[currentFileId]) return;
-            filesMap[currentFileId].params.threshold_mode = e.target.value;
-            log(`[${filesMap[currentFileId].name}] 二值化模式: ${e.target.options[e.target.selectedIndex].text}`);
-            requestPreview(currentFileId, false);
-        });
-    }
-
-    threshRange.addEventListener('input', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        threshNum.value = e.target.value;
-        threshValLabel.innerText = e.target.value;
-        filesMap[currentFileId].params.threshold = parseInt(e.target.value);
-        triggerUpdate(true);
-    });
-    threshRange.addEventListener('change', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        filesMap[currentFileId].params.threshold = parseInt(e.target.value);
-        requestPreview(currentFileId, false);
-    });
-    threshNum.addEventListener('input', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        let val = Math.max(0, Math.min(255, parseInt(e.target.value) || 0));
-        threshRange.value = val;
-        threshValLabel.innerText = val;
-        filesMap[currentFileId].params.threshold = val;
-        triggerUpdate(true);
-    });
-    threshNum.addEventListener('change', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        let val = Math.max(0, Math.min(255, parseInt(e.target.value) || 0));
-        threshRange.value = val;
-        threshValLabel.innerText = val;
-        filesMap[currentFileId].params.threshold = val;
-        requestPreview(currentFileId, false);
-    });
-
-    if (estimateThreshBtn) {
-        estimateThreshBtn.addEventListener('click', async () => {
-            if (!currentFileId || !filesMap[currentFileId]) return;
-            try {
-                estimateThreshBtn.disabled = true;
-                estimateThreshBtn.innerText = '…';
-                const res = await fetch('/api/estimate_threshold', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        session_id: sessionId,
-                        file_id: currentFileId,
-                        bg_type: filesMap[currentFileId].params.bg_type
-                    })
-                });
-                const data = await res.json();
-                if (data.threshold !== undefined) {
-                    filesMap[currentFileId].params.threshold = data.threshold;
-                    threshRange.value = data.threshold;
-                    threshNum.value = data.threshold;
-                    threshValLabel.innerText = data.threshold;
-                    log(`[${filesMap[currentFileId].name}] 大津法估算阈值: ${data.threshold}`);
-                    requestPreview(currentFileId, false);
-                }
-            } catch (err) {
-                log(`估算阈值失败: ${err}`);
-            } finally {
-                estimateThreshBtn.disabled = false;
-                estimateThreshBtn.innerText = '估算';
-            }
-        });
-    }
-
-    if (morphSizeRange) {
-        morphSizeRange.addEventListener('input', (e) => {
-            if (!currentFileId || !filesMap[currentFileId]) return;
-            const val = parseInt(e.target.value) || 0;
-            morphSizeNum.value = val;
-            morphValLabel.innerText = val + ' px';
-            filesMap[currentFileId].params.morph_size = val;
-            triggerUpdate(true);
-        });
-        morphSizeRange.addEventListener('change', (e) => {
-            if (!currentFileId || !filesMap[currentFileId]) return;
-            filesMap[currentFileId].params.morph_size = parseInt(e.target.value) || 0;
-            requestPreview(currentFileId, false);
-        });
-        morphSizeNum.addEventListener('input', (e) => {
-            if (!currentFileId || !filesMap[currentFileId]) return;
-            const val = Math.max(0, Math.min(15, parseInt(e.target.value) || 0));
-            morphSizeRange.value = val;
-            morphValLabel.innerText = val + ' px';
-            filesMap[currentFileId].params.morph_size = val;
-            triggerUpdate(true);
-        });
-        morphSizeNum.addEventListener('change', (e) => {
-            if (!currentFileId || !filesMap[currentFileId]) return;
-            filesMap[currentFileId].params.morph_size = Math.max(0, Math.min(15, parseInt(e.target.value) || 0));
-            requestPreview(currentFileId, false);
-        });
-    }
-
-    autoRotateCheck.addEventListener('change', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        filesMap[currentFileId].params.auto_rotate = e.target.checked;
-        drawCanvas();
-        renderCropPreviews();
-    });
-
-    minAreaRange.addEventListener('input', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        const val = parseFloat(e.target.value) || 0.05;
-        minAreaInput.value = val;
-        minAreaValLabel.innerText = val.toFixed(2) + '%';
-        filesMap[currentFileId].params.min_area_pct = val;
-        triggerUpdate(true);
-    });
-    minAreaRange.addEventListener('change', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        filesMap[currentFileId].params.min_area_pct = parseFloat(e.target.value) || 0.05;
-        requestPreview(currentFileId, false);
-    });
-    minAreaInput.addEventListener('input', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        const val = parseFloat(e.target.value) || 0.05;
-        minAreaRange.value = Math.min(20, val);
-        minAreaValLabel.innerText = val.toFixed(2) + '%';
-        filesMap[currentFileId].params.min_area_pct = val;
-        triggerUpdate(true);
-    });
-    minAreaInput.addEventListener('change', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        filesMap[currentFileId].params.min_area_pct = parseFloat(e.target.value) || 0.05;
-        requestPreview(currentFileId, false);
-    });
-
-    maxAreaRange.addEventListener('input', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        const val = parseFloat(e.target.value) || 100.0;
-        maxAreaInput.value = val;
-        maxAreaValLabel.innerText = val.toFixed(1) + '%';
-        filesMap[currentFileId].params.max_area_pct = val;
-        triggerUpdate(true);
-    });
-    maxAreaRange.addEventListener('change', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        filesMap[currentFileId].params.max_area_pct = parseFloat(e.target.value) || 100.0;
-        requestPreview(currentFileId, false);
-    });
-    maxAreaInput.addEventListener('input', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        const val = parseFloat(e.target.value) || 100.0;
-        maxAreaRange.value = val;
-        maxAreaValLabel.innerText = val.toFixed(1) + '%';
-        filesMap[currentFileId].params.max_area_pct = val;
-        triggerUpdate(true);
-    });
-    maxAreaInput.addEventListener('change', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        filesMap[currentFileId].params.max_area_pct = parseFloat(e.target.value) || 100.0;
-        requestPreview(currentFileId, false);
-    });
-
-    paddingRange.addEventListener('input', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        paddingNum.value = e.target.value;
-        paddingValLabel.innerText = e.target.value + ' px';
-        filesMap[currentFileId].params.padding = parseInt(e.target.value);
-        triggerUpdate(true);
-    });
-    paddingRange.addEventListener('change', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        filesMap[currentFileId].params.padding = parseInt(e.target.value);
-        requestPreview(currentFileId, false);
-    });
-    paddingNum.addEventListener('input', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        let val = Math.max(-50, Math.min(50, parseInt(e.target.value) || 0));
-        paddingRange.value = val;
-        paddingValLabel.innerText = val + ' px';
-        filesMap[currentFileId].params.padding = val;
-        triggerUpdate(true);
-    });
-    paddingNum.addEventListener('change', (e) => {
-        if (!currentFileId || !filesMap[currentFileId]) return;
-        let val = Math.max(-50, Math.min(50, parseInt(e.target.value) || 0));
-        paddingRange.value = val;
-        paddingValLabel.innerText = val + ' px';
-        filesMap[currentFileId].params.padding = val;
-        requestPreview(currentFileId, false);
-    });
-
-    autoOrientBtn.addEventListener('click', () => autoOrientAllCrops());
-    mergeCropsBtn.addEventListener('click', () => mergeSelectedCrops());
-    selectAllBtn.addEventListener('click', () => selectAllCrops());
-    splitVCropBtn.addEventListener('click', () => splitSelectedCrop('v'));
-    splitHCropBtn.addEventListener('click', () => splitSelectedCrop('h'));
-    delCropBtn.addEventListener('click', () => deleteSelectedCrop());
-    reDetectBtn.addEventListener('click', () => {
-        if (currentFileId) requestPreview(currentFileId);
-    });
-}
-
-bindInspectorEvents();
-
-syncParamsBtn.addEventListener('click', () => {
-    if (!currentFileId || !filesMap[currentFileId]) return;
-    const srcParams = { ...filesMap[currentFileId].params };
-    log(`正在将 [${filesMap[currentFileId].name}] 的调优参数同步到所有图片...`);
-
-    Object.keys(filesMap).forEach(fileId => {
-        if (fileId === currentFileId) return;
-        filesMap[fileId].params = { ...srcParams };
-        silentRequestPreview(fileId);
-    });
-    log(`全量参数同步重算完成。`);
-});
-
 exportBtn.addEventListener('click', async () => {
     if (!sessionId || Object.keys(filesMap).length === 0) return;
 
@@ -2197,7 +2694,7 @@ exportBtn.addEventListener('click', async () => {
     const exportFormat = (exportFormatSelect ? exportFormatSelect.value : 'jpg').toLowerCase();
     const namingTemplate = (namingTemplateInput && namingTemplateInput.value.trim())
         ? namingTemplateInput.value.trim()
-        : '{original}_crop_{index:02d}';
+        : '{original}_{index:02d}';
     const flat = !!(flatExportCheck && flatExportCheck.checked);
 
     const filesPayload = Object.keys(filesMap).map(fileId => ({
@@ -2251,8 +2748,9 @@ exportBtn.addEventListener('click', async () => {
 
                 const images = data.images || [];
                 for (const img of images) {
+                    const entryName = img.path || (flat ? (img.name.startsWith(img.folder) ? img.name : `${img.folder}_${img.name}`) : `${img.folder}/${img.name}`);
                     zipEntries.push({
-                        name: img.path || (flat ? `${img.folder}_${img.name}` : `${img.folder}/${img.name}`),
+                        name: entryName,
                         data: base64ToUint8Array(img.data)
                     });
                 }

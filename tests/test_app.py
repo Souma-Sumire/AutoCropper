@@ -27,6 +27,9 @@ def test_batch_api_workflow():
     data1 = res1.get_json()
     assert 'session_id' in data1
     assert 'file_id' in data1
+    assert 'suggested_threshold' in data1
+    assert isinstance(data1['suggested_threshold'], int)
+    assert 0 <= data1['suggested_threshold'] <= 255
     session_id = data1['session_id']
     file_id_1 = data1['file_id']
     

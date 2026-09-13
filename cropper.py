@@ -79,11 +79,22 @@ class ImageCropper:
             else:
                 _, thresh = cv2.threshold(blurred, 0, 255, thresh_type + cv2.THRESH_OTSU)
         elif threshold_mode == "adaptive":
-            block_size = max(11, ((threshold_val // 4) * 2 + 1))
-            c_val = 5
-            thresh = cv2.adaptiveThreshold(
+            h_img, w_img = blurred.shape[:2]
+            block_size = max(25, (int(min(h_img, w_img) // 20) | 1))
+            c_val = 6
+            raw_thresh = cv2.adaptiveThreshold(
                 blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, thresh_type, block_size, c_val
             )
+            k_close = cv2.getStructuringElement(cv2.MORPH_RECT, (11, 11))
+            closed = cv2.morphologyEx(raw_thresh, cv2.MORPH_CLOSE, k_close)
+            cnts, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            thresh = np.zeros_like(closed)
+            min_fill_area = (w_img * h_img) * 0.001
+            for c in cnts:
+                if cv2.contourArea(c) >= min_fill_area:
+                    cv2.drawContours(thresh, [c], -1, 255, thickness=-1)
+                else:
+                    cv2.drawContours(thresh, [c], -1, 255, thickness=1)
         else:
             _, thresh = cv2.threshold(blurred, threshold_val, 255, thresh_type)
 
@@ -422,17 +433,15 @@ class ImageCropper:
           - {index}: 索引数字 1, 2, 3...
           - {index:02d}: 2位补零 01, 02...
           - {index:03d}: 3位补零 001, 002...
-          - {date}: 日期 YYYYMMDD
         """
         if not template or not template.strip():
-            template = "{original}_crop_{index:02d}"
+            template = "{original}_{index:02d}"
 
         stem, _ = os.path.splitext(original_name)
-        if not date_str:
-            date_str = time.strftime("%Y%m%d")
 
         name = template.replace("{original}", stem)
-        name = name.replace("{date}", date_str)
+        if date_str:
+            name = name.replace("{date}", date_str)
         name = name.replace("{index:02d}", f"{index:02d}")
         name = name.replace("{index:03d}", f"{index:03d}")
         name = name.replace("{index}", str(index))

@@ -17,7 +17,6 @@
                         <button id="uploadBtn" class="btn-secondary" style="flex: 1;">添加本地图片</button>
                         <button id="clearAllBtn" class="btn-secondary" style="width: 52px;" title="清空全部已载入文件">清空</button>
                     </div>
-                    <div id="fileMeta" class="status-tip">等待文件载入...</div>
                 </div>
                 <div id="batchSummary" class="summary-badge">[ 已载入: 0 个文件 | 共 0 张子图 ]</div>
                 <div id="importProgress" class="import-progress" hidden>
@@ -47,8 +46,8 @@
                 </div>
                 <div class="ctrl-group">
                     <div class="ctrl-label-row"><span>自定义命名模板</span></div>
-                    <input type="text" id="namingTemplate" value="{original}_crop_{index:02d}" class="text-input">
-                    <div class="tip-text">通配符: {original} 原名, {index:02d} 序号, {date} 日期</div>
+                    <input type="text" id="namingTemplate" value="{original}_{index:02d}" class="text-input">
+                    <div class="tip-text">通配符: {original} 原名, {index:02d} 两位序号 (如 01), {index} 序号</div>
                 </div>
                 <div class="ctrl-group">
                     <label class="checkbox-row">
@@ -62,174 +61,59 @@
 
         <!-- 2. 中间面板：视口工作区 -->
         <main class="panel-center">
-            <!-- 视口顶部工具与模式栏 -->
-            <header class="viewport-toolbar">
-                <div class="tabs-group">
-                    <div class="tab-item active" data-mode="original">[1. 原图与选框]</div>
-                    <div class="tab-item" data-mode="threshold">[2. 二值化调试图]</div>
-                    <div class="tab-item" data-mode="blurred">[3. 灰度模糊图]</div>
-                </div>
-                <div class="viewport-info" id="viewportInfo">未选择文件</div>
-                <div class="shortcut-tip">Ctrl: 自由拖拽 · Shift: 框选/多选</div>
-            </header>
-
             <!-- 核心画布显示区 -->
             <div class="canvas-viewport" id="canvasViewport">
                 <div class="upload-dropzone" id="dropZone">
                     <div class="drop-title">[ 拖拽任意数量扫描件至此窗口 ]</div>
                     <div class="drop-sub">支持多图批量导入与自动识别 | 或点击左侧“添加本地图片”</div>
                 </div>
+
+                <!-- 连续级联多图流容器：支持滚轮连续通览所有扫描件 -->
+                <div class="stream-container" id="streamContainer" style="display: none;"></div>
+
+                <!-- 兼容旧单画布隐藏备用 -->
                 <canvas id="mainCanvas" style="display: none;"></canvas>
-            </div>
 
-            <!-- 底部子图预览抽屉 -->
-            <div class="preview-drawer">
-                <div class="drawer-header">
-                    <span>矫正子图预览</span>
-                    <span class="drawer-hint">Z/C 旋转90° · X 转180°/反选排除 · Shift 多选</span>
+                <!-- 批量导入与自动检测全局 Loading 指示器 -->
+                <div id="viewportLoading" class="viewport-loading" style="display: none;">
+                    <div class="loading-card">
+                        <div class="loading-header">
+                            <span class="loading-title">正在批量导入扫描件并智能检测</span>
+                            <span id="loadingPercentText" class="loading-percent">0%</span>
+                        </div>
+                        <div class="loading-progress-track">
+                            <div id="loadingProgressFill" class="loading-progress-fill"></div>
+                        </div>
+                        <div class="loading-info-row">
+                            <span id="loadingFilename" class="loading-filename">准备导入...</span>
+                            <span id="loadingCountText" class="loading-count">[0 / 0]</span>
+                        </div>
+                        <div class="loading-detail" id="loadingDetail">正在计算灰度直方图并自适应定位多图边缘...</div>
+                    </div>
                 </div>
-                <div class="preview-strip" id="cropPreviewStrip">
-                    <div class="empty-hint">暂无检出子图</div>
-                </div>
-            </div>
-
-            <!-- 最底部紧凑控制台栏 -->
-            <footer class="statusbar">
-                <div class="statusbar-toggle" id="consoleToggle">控制台日志 ▲</div>
-                <div class="statusbar-msg" id="statusbarMsg">控制台就绪</div>
-            </footer>
-            <div class="console-drawer" id="consoleDrawer" style="display: none;">
-                <textarea id="consoleLog" readonly>控制台就绪，请上传文件开始处理...</textarea>
             </div>
         </main>
-
-        <!-- 3. 右侧面板：当前图片参数检查器 (常驻单一面板) -->
-        <aside class="panel-right" id="inspectorPanel">
-            <div class="panel-section">
-                <div class="section-header">预处理调优</div>
-                <div class="ctrl-group">
-                    <div class="ctrl-label-row"><span>背景色模式</span></div>
-                    <div class="radio-row">
-                        <label><input type="radio" name="bgType" value="light" checked> 浅色白底</label>
-                        <label><input type="radio" name="bgType" value="dark"> 深色黑底</label>
-                    </div>
-                </div>
-                <div class="ctrl-group">
-                    <div class="ctrl-label-row"><span>高斯模糊大小</span></div>
-                    <select id="blurKernel" class="select-input">
-                        <option value="1">1 (无模糊)</option>
-                        <option value="3" selected>3</option>
-                        <option value="5">5</option>
-                        <option value="7">7</option>
-                        <option value="9">9</option>
-                        <option value="11">11</option>
-                        <option value="15">15</option>
-                        <option value="21">21</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="panel-section">
-                <div class="section-header">分割与阈值</div>
-                <div class="ctrl-group">
-                    <div class="ctrl-label-row"><span>二值化算法模式</span></div>
-                    <select id="threshMode" class="select-input">
-                        <option value="fixed" selected>固定阈值 (手动微调)</option>
-                        <option value="otsu">Otsu 大津法 (自动双峰)</option>
-                        <option value="adaptive">自适应局部高斯 (抗发黄/暗角)</option>
-                    </select>
-                </div>
-                <div class="ctrl-group">
-                    <div class="ctrl-label-row">
-                        <span>二值化阈值</span>
-                        <span id="threshValLabel" class="val-badge">200</span>
-                    </div>
-                    <div class="ctrl-input-row">
-                        <input type="range" id="threshold" min="0" max="255" value="200" class="range-input">
-                        <input type="number" id="thresholdNum" min="0" max="255" value="200" class="num-input">
-                        <button id="estimateThreshBtn" class="btn-mini" title="基于直方图自动估算最佳阈值">估算</button>
-                    </div>
-                </div>
-                <div class="ctrl-group">
-                    <div class="ctrl-label-row">
-                        <span>形态学平滑 (闭合缝隙)</span>
-                        <span id="morphValLabel" class="val-badge">0 px</span>
-                    </div>
-                    <div class="ctrl-input-row">
-                        <input type="range" id="morphSizeRange" min="0" max="15" value="0" class="range-input">
-                        <input type="number" id="morphSizeNum" min="0" max="15" value="0" class="num-input">
-                    </div>
-                </div>
-                <div class="ctrl-group">
-                    <label class="checkbox-row">
-                        <input type="checkbox" id="autoRotate" checked>
-                        <span>自动倾斜矫正 (旋转摆正照片)</span>
-                    </label>
-                </div>
-            </div>
-
-            <div class="panel-section">
-                <div class="section-header">轮廓面积与边缘</div>
-                <div class="ctrl-group">
-                    <div class="ctrl-label-row">
-                        <span>最小面积占比 (%)</span>
-                        <span id="minAreaValLabel" class="val-badge">0.8%</span>
-                    </div>
-                    <div class="ctrl-input-row">
-                        <input type="range" id="minAreaRange" min="0.01" max="20" step="0.05" value="0.8" class="range-input">
-                        <input type="number" id="minArea" min="0.01" max="100" step="0.05" value="0.8" class="num-input" style="width: 50px;">
-                    </div>
-                </div>
-                <div class="ctrl-group">
-                    <div class="ctrl-label-row">
-                        <span>最大面积占比 (%)</span>
-                        <span id="maxAreaValLabel" class="val-badge">80%</span>
-                    </div>
-                    <div class="ctrl-input-row">
-                        <input type="range" id="maxAreaRange" min="5" max="100" step="0.5" value="80.0" class="range-input">
-                        <input type="number" id="maxArea" min="0.1" max="100" step="0.5" value="80.0" class="num-input" style="width: 50px;">
-                    </div>
-                </div>
-                <div class="ctrl-group">
-                    <div class="ctrl-label-row">
-                        <span>外扩边缘 (px)</span>
-                        <span id="paddingValLabel" class="val-badge">2 px</span>
-                    </div>
-                    <div class="ctrl-input-row">
-                        <input type="range" id="padding" min="-50" max="50" value="2" class="range-input">
-                        <input type="number" id="paddingNum" min="-50" max="50" value="2" class="num-input">
-                    </div>
-                </div>
-            </div>
-
-            <div class="panel-section">
-                <div class="section-header">
-                    <span>选框工具箱</span>
-                    <span id="multiCountBadge" class="val-badge">已选 0 个</span>
-                </div>
-                <div class="tool-grid full">
-                    <button id="autoOrientBtn" class="btn-action" title="基于人脸与图像特征智能预判朝向并摆正">自动纠正所有朝向</button>
-                </div>
-                <div class="tool-grid">
-                    <button id="mergeCropsBtn" class="btn-tool" title="合并选中的多个框 (快捷键: M)">合并多框 (M)</button>
-                    <button id="selectAllBtn" class="btn-tool" title="全选当前图片的所有裁剪框 (快捷键: Ctrl+A)">全选 (Ctrl+A)</button>
-                </div>
-                <div class="tool-grid">
-                    <button id="splitVCropBtn" class="btn-tool" title="将当前选中框垂直二等分 (快捷键: V)">垂直拆分 (V)</button>
-                    <button id="splitHCropBtn" class="btn-tool" title="将当前选中框水平二等分 (快捷键: H)">水平拆分 (H)</button>
-                </div>
-                <div class="tool-grid">
-                    <button id="delCropBtn" class="btn-tool danger" title="删除选中的裁剪框 (快捷键: Delete / Backspace)">删除选中框</button>
-                    <button id="reDetectBtn" class="btn-tool" title="使用当前参数重新检测">重新自动检测</button>
-                </div>
-                <button id="syncParamsBtn" class="btn-secondary" style="margin-top: 10px;" disabled>同步当前参数到所有图片</button>
-            </div>
-        </aside>
     </div>
 
     <!-- 全局拖放遮罩层 -->
     <div id="dragOverlay" class="drag-overlay" style="display: none;">
         <div class="drag-overlay-box">[ 释放鼠标以批量导入扫描件 ]</div>
+    </div>
+
+    <!-- 犄角旮旯：右下角极简控制台浮动停靠栏与浮窗 -->
+    <div class="corner-console-dock">
+        <span class="corner-status-msg" id="statusbarMsg" style="display: none;">控制台就绪</span>
+        <button id="consoleToggle" class="corner-console-btn" title="查看工程控制台日志">控制台日志 ▤</button>
+    </div>
+    <div id="consoleDrawer" class="corner-console-popover" style="display: none;">
+        <div class="corner-console-header">
+            <span class="corner-console-title">工程控制台日志 (CONSOLE LOGS)</span>
+            <div class="corner-console-actions">
+                <button id="clearLogBtn" class="corner-btn-mini">清空</button>
+                <button id="closeLogBtn" class="corner-btn-mini">收起 ✕</button>
+            </div>
+        </div>
+        <textarea id="consoleLog" readonly>控制台就绪，请上传文件开始处理...</textarea>
     </div>
 
     <script src="/static/js/app.js"></script>

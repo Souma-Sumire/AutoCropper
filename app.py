@@ -52,6 +52,9 @@ def upload_image():
     
     cv2.imwrite(os.path.join(session_path, "preview.png"), preview_img)
     
+    gray = cv2.cvtColor(preview_img, cv2.COLOR_BGR2GRAY)
+    auto_thresh = ImageCropper.estimate_best_threshold(gray, "light")
+
     _, buffer = cv2.imencode('.png', preview_img)
     thumbnail_base64 = base64.b64encode(buffer).decode('utf-8')
     
@@ -61,7 +64,8 @@ def upload_image():
         "filename": file.filename,
         "width": w,
         "height": h,
-        "thumbnail": f"data:image/png;base64,{thumbnail_base64}"
+        "thumbnail": f"data:image/png;base64,{thumbnail_base64}",
+        "suggested_threshold": auto_thresh
     })
 
 @app.route('/api/estimate_threshold', methods=['POST'])
@@ -220,6 +224,8 @@ def _collect_cropped_items(session_id, files, naming_template=None, ext="jpg"):
 
 def _export_entry_path(folder, name, flat=False):
     if flat:
+        if name.startswith(f"{folder}_") or name.startswith(folder):
+            return name
         return f"{folder}_{name}"
     return f"{folder}/{name}"
 
@@ -230,7 +236,7 @@ def export_crops():
     files = data.get("files", [])
     export_type = data.get("export_type", "zip")
     export_format = (data.get("format") or "jpg").lower().lstrip(".")
-    naming_template = data.get("naming_template") or "{original}_crop_{index:02d}"
+    naming_template = data.get("naming_template") or "{original}_{index:02d}"
     quality = int(data.get("quality", 100))
     flat = bool(data.get("flat", False))
 
@@ -289,12 +295,9 @@ def export_crops():
         os.makedirs(local_out_dir, exist_ok=True)
 
         for folder, name, img in all_cropped_items:
-            if flat:
-                out_path = os.path.join(local_out_dir, f"{folder}_{name}")
-            else:
-                target_folder = os.path.join(local_out_dir, folder)
-                os.makedirs(target_folder, exist_ok=True)
-                out_path = os.path.join(target_folder, name)
+            rel_entry = _export_entry_path(folder, name, flat=flat)
+            out_path = os.path.join(local_out_dir, rel_entry)
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
             if not ImageCropper.imwrite(out_path, img, quality=quality):
                 return jsonify({"error": f"写入失败: {out_path}"}), 500
 

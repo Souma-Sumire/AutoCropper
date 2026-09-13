@@ -68,6 +68,9 @@ def test_split_and_merge_rects():
     assert merged["h"] >= rect["h"] - 5
 
 def test_format_crop_name():
+    res_default = ImageCropper.format_crop_name(None, "photo_sample.png", 1, ext="jpg")
+    assert res_default == "photo_sample_01.jpg"
+
     res = ImageCropper.format_crop_name(
         "{original}_scan_{index:02d}", "photo_sample.png", 5, ext="jpg"
     )
