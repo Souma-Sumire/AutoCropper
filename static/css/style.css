@@ -853,6 +853,16 @@ canvas#mainCanvas {
     grid-template-columns: 1fr;
 }
 
+.shortcut-tip-row {
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-align: center;
+    padding-top: 10px;
+    line-height: 1.4;
+    user-select: none;
+    opacity: 0.75;
+}
+
 .btn-tool {
     height: 34px;
     background-color: transparent;

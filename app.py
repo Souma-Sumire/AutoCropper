@@ -150,11 +150,25 @@ def preview_crops():
     preview_img = cv2.imread(preview_path)
     gray = cv2.cvtColor(preview_img, cv2.COLOR_BGR2GRAY)
     
+    auto_rotate = bool(data.get("auto_rotate", True))
+
     start_time = time.time()
     blurred, thresh = ImageCropper.process_preview(
         gray, blur_kernel, threshold_val, bg_type, threshold_mode=threshold_mode, morph_size=morph_size
     )
     rects, filtered_count = ImageCropper.detect_rects(thresh, min_area_pct, max_area_pct, padding)
+
+    # 自动识别并纠正朝向（自动转正照片）
+    if auto_rotate:
+        for r in rects:
+            crop = ImageCropper.extract_crop(
+                preview_img, r, scale_x=1.0, scale_y=1.0, auto_rotate=True, bg_type=bg_type
+            )
+            if crop is not None and crop.size > 0:
+                deg = ImageCropper.predict_orientation(crop)
+                if deg != 0:
+                    r["orient"] = deg
+
     elapsed_ms = int((time.time() - start_time) * 1000)
     
     debug_image_base64 = ""

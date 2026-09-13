@@ -422,7 +422,7 @@ async function handleFiles(files) {
                         bg_type: 'light',
                         min_area_pct: 0.25,
                         max_area_pct: 80.0,
-                        padding: 2,
+                        padding: 5,
                         auto_rotate: true
                     },
                     debugImgSrc: null,
@@ -605,8 +605,8 @@ function renderStreamContainer() {
                     <div class="ctrl-group">
                         <div class="ctrl-label-row"><span>外扩边缘 (px)</span></div>
                         <div class="ctrl-input-row">
-                            <input type="range" id="padding-${fileId}" min="-50" max="300" value="${item.params.padding}" class="range-input">
-                            <input type="number" id="paddingNum-${fileId}" min="-200" max="1000" value="${item.params.padding}" class="num-input">
+                            <input type="range" id="padding-${fileId}" min="-20" max="20" value="${item.params.padding}" class="range-input">
+                            <input type="number" id="paddingNum-${fileId}" min="-20" max="20" value="${item.params.padding}" class="num-input">
                         </div>
                     </div>
                     <div class="tool-divider"></div>
@@ -614,13 +614,8 @@ function renderStreamContainer() {
                         <button id="reDetectBtn-${fileId}" class="btn-tool" title="以当前参数重新检测">重新检测</button>
                         <button id="syncParamsBtn-${fileId}" class="btn-tool" title="将当前参数同步到所有图片">同步至全部</button>
                     </div>
-                    <div class="tool-grid">
-                        <button id="selectAllBtn-${fileId}" class="btn-tool" title="全选当前图片的所有裁剪框 (快捷键: Ctrl+A)">全选 (Ctrl+A)</button>
-                        <button id="mergeCropsBtn-${fileId}" class="btn-tool" title="合并选中的多个框 (快捷键: M)">合并多框 (M)</button>
-                    </div>
-                    <div class="tool-grid">
-                        <button id="autoOrientBtn-${fileId}" class="btn-tool" title="自动判断并纠正所有照片朝向">纠正朝向</button>
-                        <button id="delCropBtn-${fileId}" class="btn-tool danger" title="删除选中的裁剪框 (快捷键: Delete)">删除选中框</button>
+                    <div class="shortcut-tip-row">
+                        <span>Ctrl+A 全选 · M 合并 · Delete 删除 · X 翻转</span>
                     </div>
                 </div>
             `;
@@ -872,21 +867,58 @@ function bindCardEvents(fileId) {
         });
     }
 
+    let paddingDragging = false;
+    let pendingPaddingSnapshot = null;
+
     if (padRange && padNum) {
+        const startPadDrag = () => {
+            paddingDragging = true;
+            pendingPaddingSnapshot = JSON.parse(JSON.stringify(fileData.rects || []));
+        };
+        padRange.addEventListener('mousedown', startPadDrag);
+        padRange.addEventListener('touchstart', startPadDrag, { passive: true });
+
         padRange.addEventListener('input', (e) => {
-            const v = parseInt(e.target.value) || 0;
-            padNum.value = v;
-            if (padLabel) padLabel.innerText = v + ' px';
-            fileData.params.padding = v;
-            triggerUpdate(true);
+            const newPadding = parseInt(e.target.value) || 0;
+            padNum.value = newPadding;
+            if (padLabel) padLabel.innerText = newPadding + ' px';
+
+            const oldPadding = fileData.params.padding !== undefined ? fileData.params.padding : 5;
+            const delta = newPadding - oldPadding;
+            fileData.params.padding = newPadding;
+
+            if (delta !== 0) {
+                applyPaddingDelta(fileId, delta);
+            }
         });
+
+        const finishPaddingDrag = () => {
+            if (paddingDragging) {
+                paddingDragging = false;
+                if (pendingPaddingSnapshot) {
+                    pushUndoState(fileId, pendingPaddingSnapshot);
+                    pendingPaddingSnapshot = null;
+                }
+            }
+        };
+        padRange.addEventListener('change', finishPaddingDrag);
+        padRange.addEventListener('mouseup', finishPaddingDrag);
+        padRange.addEventListener('touchend', finishPaddingDrag);
+
         padNum.addEventListener('change', (e) => {
-            const v = parseInt(e.target.value) || 0;
-            padRange.value = v;
-            padNum.value = v;
-            if (padLabel) padLabel.innerText = v + ' px';
-            fileData.params.padding = v;
-            requestPreview(fileId, false);
+            const newPadding = Math.max(-20, Math.min(20, parseInt(e.target.value) || 0));
+            padRange.value = newPadding;
+            padNum.value = newPadding;
+            if (padLabel) padLabel.innerText = newPadding + ' px';
+
+            const oldPadding = fileData.params.padding !== undefined ? fileData.params.padding : 5;
+            const delta = newPadding - oldPadding;
+            fileData.params.padding = newPadding;
+
+            if (delta !== 0) {
+                pushUndoState(fileId);
+                applyPaddingDelta(fileId, delta);
+            }
         });
     }
 
@@ -1068,14 +1100,21 @@ function selectFile(fileId, shouldScroll = false) {
 function mergeRectsPreserveFlip(oldRects, newRects) {
     return (newRects || []).map((rect, idx) => {
         const prev = oldRects && oldRects[idx];
-        let orient = 0;
+        let orient = (typeof rect.orient === 'number') ? rect.orient : 0;
         let excluded = false;
+        let userModified = false;
         if (prev) {
-            if (typeof prev.orient === 'number') orient = ((prev.orient % 360) + 360) % 360;
-            else if (prev.flip180) orient = 180;
+            if (prev._userOrientModified && typeof prev.orient === 'number') {
+                orient = ((prev.orient % 360) + 360) % 360;
+                userModified = true;
+            } else if (typeof rect.orient === 'number') {
+                orient = ((rect.orient % 360) + 360) % 360;
+            } else if (typeof prev.orient === 'number') {
+                orient = ((prev.orient % 360) + 360) % 360;
+            }
             if (prev.excluded !== undefined) excluded = !!prev.excluded;
         }
-        return { ...rect, orient, excluded };
+        return { ...rect, orient, excluded, _userOrientModified: userModified };
     });
 }
 
@@ -1439,6 +1478,7 @@ function rotateSelectedCrop(deltaDeg) {
         if (rects[idx]) {
             const cur = getRectOrient(rects[idx]);
             rects[idx].orient = (cur + deltaDeg + 360) % 360;
+            rects[idx]._userOrientModified = true;
             delete rects[idx].flip180;
         }
     });
@@ -1696,6 +1736,38 @@ function computeBoxPoints(cx, cy, w, h, angle) {
     ];
 }
 
+function applyPaddingDelta(fileId, delta) {
+    if (!delta || !filesMap[fileId]) return;
+    const fileData = filesMap[fileId];
+    const rects = fileData.rects || [];
+    if (rects.length === 0) return;
+
+    rects.forEach(rect => {
+        if (rect.rotated && rect.rotated.points) {
+            const rot = rect.rotated;
+            rot.w = Math.max(8, rot.w + 2 * delta);
+            rot.h = Math.max(8, rot.h + 2 * delta);
+            rot.points = computeBoxPoints(rot.cx, rot.cy, rot.w, rot.h, rot.angle || 0);
+            const xs = rot.points.map(p => p[0]);
+            const ys = rot.points.map(p => p[1]);
+            const minX = Math.min(...xs);
+            const minY = Math.min(...ys);
+            rect.x = Math.max(0, minX);
+            rect.y = Math.max(0, minY);
+            rect.w = Math.max(...xs) - minX;
+            rect.h = Math.max(...ys) - minY;
+        } else {
+            rect.x = Math.max(0, rect.x - delta);
+            rect.y = Math.max(0, rect.y - delta);
+            rect.w = Math.max(8, rect.w + 2 * delta);
+            rect.h = Math.max(8, rect.h + 2 * delta);
+        }
+    });
+
+    drawCanvas(fileId);
+    renderCropPreviews(fileId);
+}
+
 function getTransformHandles(rect) {
     let rot = rect.rotated;
     if (!rot || !rot.points) {
@@ -1762,81 +1834,8 @@ function getCanvasCoords(canvas, e) {
     };
 }
 
-function getEdgeSnap(x, y, isCtrlPressed) {
-    if (isCtrlPressed || !currentFileId || !filesMap[currentFileId]) {
-        return { x, y, snapped: false };
-    }
-    const fileData = filesMap[currentFileId];
-    if (!fileData._cachedImg) return { x, y, snapped: false };
-
-    if (!fileData._edgeCanvas) {
-        fileData._edgeCanvas = document.createElement('canvas');
-        fileData._edgeCanvas.width = fileData._cachedImg.width;
-        fileData._edgeCanvas.height = fileData._cachedImg.height;
-        fileData._edgeCtx = fileData._edgeCanvas.getContext('2d', { willReadFrequently: true });
-        fileData._edgeCtx.drawImage(fileData._cachedImg, 0, 0);
-    }
-
-    const ctx = fileData._edgeCtx;
-    const searchR = 9;
-    const sx = Math.max(1, Math.min(fileData._cachedImg.width - searchR * 2 - 2, Math.round(x - searchR)));
-    const sy = Math.max(1, Math.min(fileData._cachedImg.height - searchR * 2 - 2, Math.round(y - searchR)));
-    const sw = searchR * 2 + 1;
-    const sh = searchR * 2 + 1;
-
-    try {
-        const imgData = ctx.getImageData(sx, sy, sw, sh);
-        const data = imgData.data;
-
-        let maxGradX = 0;
-        let bestOffsetGx = 0;
-        let maxGradY = 0;
-        let bestOffsetGy = 0;
-
-        const centerY = searchR;
-        const centerX = searchR;
-
-        for (let i = 1; i < sw - 1; i++) {
-            const idxLeft = (centerY * sw + (i - 1)) * 4;
-            const idxRight = (centerY * sw + (i + 1)) * 4;
-            const grayL = data[idxLeft] * 0.299 + data[idxLeft + 1] * 0.587 + data[idxLeft + 2] * 0.114;
-            const grayR = data[idxRight] * 0.299 + data[idxRight + 1] * 0.587 + data[idxRight + 2] * 0.114;
-            const grad = Math.abs(grayR - grayL);
-            if (grad > maxGradX) {
-                maxGradX = grad;
-                bestOffsetGx = i - centerX;
-            }
-        }
-
-        for (let j = 1; j < sh - 1; j++) {
-            const idxTop = ((j - 1) * sw + centerX) * 4;
-            const idxBot = ((j + 1) * sw + centerX) * 4;
-            const grayT = data[idxTop] * 0.299 + data[idxTop + 1] * 0.587 + data[idxTop + 2] * 0.114;
-            const grayB = data[idxBot] * 0.299 + data[idxBot + 1] * 0.587 + data[idxBot + 2] * 0.114;
-            const grad = Math.abs(grayB - grayT);
-            if (grad > maxGradY) {
-                maxGradY = grad;
-                bestOffsetGy = j - centerY;
-            }
-        }
-
-        let snappedX = x;
-        let snappedY = y;
-        let isSnapped = false;
-
-        if (maxGradX > 30 && Math.abs(bestOffsetGx) <= 8) {
-            snappedX = x + bestOffsetGx;
-            isSnapped = true;
-        }
-        if (maxGradY > 30 && Math.abs(bestOffsetGy) <= 8) {
-            snappedY = y + bestOffsetGy;
-            isSnapped = true;
-        }
-
-        return { x: snappedX, y: snappedY, snapped: isSnapped };
-    } catch (_) {
-        return { x, y, snapped: false };
-    }
+function getEdgeSnap(x, y) {
+    return { x, y, snapped: false };
 }
 
 const ROTATE_CURSORS = {};
@@ -2458,6 +2457,7 @@ window.addEventListener('keydown', (e) => {
                     } else {
                         const cur = getRectOrient(curRect);
                         curRect.orient = (cur + 180) % 360;
+                        curRect._userOrientModified = true;
                         delete curRect.flip180;
                     }
                 }
@@ -2528,12 +2528,21 @@ function drawCanvas(targetFileId) {
                     currentStroke = multiSelectColor;
                 }
 
-                canvasCtx.strokeStyle = currentStroke;
-                canvasCtx.lineWidth = calculatedLineWidth + (isSelected ? 1 : 0);
-
+                const baseLineWidth = calculatedLineWidth + (isSelected ? 1 : 0);
                 const hInfo = getTransformHandles(rect);
                 const pts = hInfo.corners;
 
+                // 统一计算选框在画面上的真实左上角位置
+                let minX, minY;
+                if (isAutoRotate && pts) {
+                    minX = Math.min(pts[0][0], pts[1][0], pts[2][0], pts[3][0]);
+                    minY = Math.min(pts[0][1], pts[1][1], pts[2][1], pts[3][1]);
+                } else {
+                    minX = rect.x;
+                    minY = rect.y;
+                }
+
+                // 增加边框辨识度：底层深色反差边框 + 顶层主色高亮边框
                 if (isAutoRotate && pts) {
                     canvasCtx.beginPath();
                     canvasCtx.moveTo(pts[0][0], pts[0][1]);
@@ -2541,6 +2550,7 @@ function drawCanvas(targetFileId) {
                     canvasCtx.lineTo(pts[2][0], pts[2][1]);
                     canvasCtx.lineTo(pts[3][0], pts[3][1]);
                     canvasCtx.closePath();
+
                     if (isExcluded) {
                         canvasCtx.fillStyle = 'rgba(255, 59, 48, 0.16)';
                         canvasCtx.fill();
@@ -2548,23 +2558,16 @@ function drawCanvas(targetFileId) {
                         canvasCtx.fillStyle = 'rgba(41, 182, 246, 0.1)';
                         canvasCtx.fill();
                     }
+
+                    // 1. 底层高对比度深色衬边，抗浅色/斜纹底纸干扰
+                    canvasCtx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+                    canvasCtx.lineWidth = baseLineWidth + 2;
                     canvasCtx.stroke();
 
-                    canvasCtx.fillStyle = currentStroke;
-                    canvasCtx.font = `bold ${fontSize}px Consolas, monospace`;
-                    const orientLabel = formatOrientLabel(getRectOrient(rect));
-                    const angleStr = Math.abs(hInfo.angle) > 0.05 ? ` ${hInfo.angle > 0 ? '+' : ''}${hInfo.angle.toFixed(1)}°` : '';
-                    const labelPrefix = isExcluded ? '[排 ' : '[';
-                    const multiMark = (selIndices.size > 1 && isSelected) ? ' ✓' : '';
-                    const label = `${labelPrefix}#${index + 1}]${orientLabel ? ' ' + orientLabel : ''}${angleStr}${multiMark}`;
-                    const textWidth = canvasCtx.measureText(label).width;
-
-                    const rectH = fontSize + (paddingOffset * 2);
-                    const rectY = pts[0][1] - rectH > 0 ? pts[0][1] - rectH : 0;
-
-                    canvasCtx.fillRect(pts[0][0], rectY, textWidth + (paddingOffset * 2), rectH);
-                    canvasCtx.fillStyle = isExcluded ? '#ffffff' : '#000000';
-                    canvasCtx.fillText(label, pts[0][0] + paddingOffset, rectY + fontSize);
+                    // 2. 顶层主色线条
+                    canvasCtx.strokeStyle = currentStroke;
+                    canvasCtx.lineWidth = baseLineWidth;
+                    canvasCtx.stroke();
                 } else {
                     if (isExcluded) {
                         canvasCtx.fillStyle = 'rgba(255, 59, 48, 0.16)';
@@ -2573,23 +2576,40 @@ function drawCanvas(targetFileId) {
                         canvasCtx.fillStyle = 'rgba(41, 182, 246, 0.1)';
                         canvasCtx.fillRect(rect.x, rect.y, rect.w, rect.h);
                     }
+
+                    // 1. 底层高对比度深色衬边
+                    canvasCtx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+                    canvasCtx.lineWidth = baseLineWidth + 2;
                     canvasCtx.strokeRect(rect.x, rect.y, rect.w, rect.h);
 
-                    canvasCtx.fillStyle = currentStroke;
-                    canvasCtx.font = `bold ${fontSize}px Consolas, monospace`;
-                    const orientLabel = formatOrientLabel(getRectOrient(rect));
-                    const labelPrefix = isExcluded ? '[排 ' : '[';
-                    const multiMark = (selIndices.size > 1 && isSelected) ? ' ✓' : '';
-                    const label = `${labelPrefix}#${index + 1}]${orientLabel ? ' ' + orientLabel : ''}${multiMark}`;
-                    const textWidth = canvasCtx.measureText(label).width;
-
-                    const rectH = fontSize + (paddingOffset * 2);
-                    const rectY = rect.y - rectH > 0 ? rect.y - rectH : 0;
-
-                    canvasCtx.fillRect(rect.x, rectY, textWidth + (paddingOffset * 2), rectH);
-                    canvasCtx.fillStyle = isExcluded ? '#ffffff' : '#000000';
-                    canvasCtx.fillText(label, rect.x + paddingOffset, rectY + fontSize);
+                    // 2. 顶层主色线条
+                    canvasCtx.strokeStyle = currentStroke;
+                    canvasCtx.lineWidth = baseLineWidth;
+                    canvasCtx.strokeRect(rect.x, rect.y, rect.w, rect.h);
                 }
+
+                // 统一将识别结果标签固定在图片的【左上角】
+                canvasCtx.font = `bold ${fontSize}px Consolas, monospace`;
+                const orientLabel = formatOrientLabel(getRectOrient(rect));
+                const angleStr = (isAutoRotate && Math.abs(hInfo.angle) > 0.05) ? ` ${hInfo.angle > 0 ? '+' : ''}${hInfo.angle.toFixed(1)}°` : '';
+                const labelPrefix = isExcluded ? '[排 ' : '[';
+                const multiMark = (selIndices.size > 1 && isSelected) ? ' ✓' : '';
+                const label = `${labelPrefix}#${index + 1}]${orientLabel ? ' ' + orientLabel : ''}${angleStr}${multiMark}`;
+                const textWidth = canvasCtx.measureText(label).width;
+
+                const rectH = fontSize + (paddingOffset * 2);
+                const rectW = textWidth + (paddingOffset * 2);
+                const labelX = Math.max(0, minX);
+                const labelY = (minY - rectH >= 0) ? (minY - rectH) : minY;
+
+                // 深色微衬底 + 顶层主色底，保证标签清晰度
+                canvasCtx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                canvasCtx.fillRect(labelX, labelY, rectW, rectH);
+                canvasCtx.fillStyle = currentStroke;
+                canvasCtx.fillRect(labelX + 1, labelY + 1, rectW - 2, rectH - 2);
+
+                canvasCtx.fillStyle = isExcluded ? '#ffffff' : '#000000';
+                canvasCtx.fillText(label, labelX + paddingOffset, labelY + fontSize);
 
                 if (isPrimary && fileId === currentFileId) {
                     canvasCtx.fillStyle = '#ffffff';
