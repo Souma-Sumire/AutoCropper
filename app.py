@@ -72,7 +72,7 @@ def preview_crops():
     blur_kernel = int(data.get("blur_kernel", 3))
     threshold_val = int(data.get("threshold", 200))
     bg_type = data.get("bg_type", "light")
-    min_area_pct = float(data.get("min_area_pct", 3.0))
+    min_area_pct = float(data.get("min_area_pct", 0.8))
     max_area_pct = float(data.get("max_area_pct", 80.0))
     padding = int(data.get("padding", 5))
     debug_mode = data.get("debug_mode", "original")

@@ -346,6 +346,9 @@ textarea#consoleLog {
     height: auto;
     border: 1px solid var(--border-color);
     background-color: var(--bg-primary);
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
 }
 
 /* 右侧专属调参小控制面板 */
@@ -356,9 +359,7 @@ textarea#consoleLog {
     padding-left: 20px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    max-height: 550px;
-    overflow-y: auto;
+    gap: 9px;
 }
 
 .canvas-page-right h4 {
@@ -457,6 +458,17 @@ textarea#consoleLog {
 .crop-preview-item.selected {
     border-color: var(--accent-color);
     box-shadow: 0 0 0 1px var(--accent-color);
+}
+
+.crop-preview-item.excluded {
+    border-color: #ff3b30;
+    opacity: 0.65;
+}
+
+.crop-preview-item.excluded.selected {
+    border-color: #ff3b30;
+    box-shadow: 0 0 0 1px #ff3b30;
+    opacity: 0.9;
 }
 
 .crop-preview-item img {

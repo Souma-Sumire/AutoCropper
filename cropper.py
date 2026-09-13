@@ -22,6 +22,7 @@ class ImageCropper:
         
         thresh_type = cv2.THRESH_BINARY_INV if bg_type == "light" else cv2.THRESH_BINARY
         _, thresh = cv2.threshold(blurred, threshold_val, 255, thresh_type)
+
         return blurred, thresh
 
     @staticmethod
@@ -35,8 +36,22 @@ class ImageCropper:
         filtered_count = 0
         
         for c in contours:
-            area = cv2.contourArea(c)
-            area_pct = (area / total_area) * 100.0
+            # 最小外接旋转矩形
+            rect = cv2.minAreaRect(c)
+            (cx, cy), (rw, rh), angle = rect
+            rect_area = rw * rh
+            contour_area = cv2.contourArea(c)
+
+            # 使用矩形与轮廓的有效面积评估占比，避免老照片空心或断裂导致面积被严重低估
+            effective_area = max(contour_area, rect_area)
+            area_pct = (effective_area / total_area) * 100.0
+
+            # 过滤扫描边缘长条阴影（极端长宽比）
+            min_dim = max(1.0, min(rw, rh))
+            aspect_ratio = max(rw, rh) / min_dim
+            if aspect_ratio > 10.0:
+                filtered_count += 1
+                continue
             
             if min_area_pct <= area_pct <= max_area_pct:
                 # 1. 传统水平包围框
@@ -45,10 +60,6 @@ class ImageCropper:
                 y_new = max(0, y - padding)
                 w_new = min(w - x_new, w_box + 2 * padding)
                 h_new = min(h - y_new, h_box + 2 * padding)
-                
-                # 2. 最小外接旋转矩形
-                rect = cv2.minAreaRect(c)
-                (cx, cy), (rw, rh), angle = rect
                 
                 # 对旋转矩形的高宽尺寸应用双向 padding 外扩
                 rw_padded = rw + 2 * padding

@@ -75,3 +75,21 @@ def test_imwrite_unicode_path(tmp_path):
     assert ImageCropper.imwrite(str(out), img)
     assert out.exists()
     assert out.stat().st_size > 0
+
+def test_detect_rects_with_hollow_or_scalloped_border():
+    # 模拟 200x200 图像中有一个 40x40 空心方框（边缘像素少，但外接矩形占 4%）
+    thresh = np.zeros((200, 200), dtype=np.uint8)
+    cv2.rectangle(thresh, (50, 50), (90, 90), 255, 2) # 空心矩形框线
+    rects, _ = ImageCropper.detect_rects(thresh, min_area_pct=2.0, max_area_pct=80.0, padding=0)
+    assert len(rects) == 1
+    assert abs(rects[0]['w'] - 41) <= 2
+    assert abs(rects[0]['h'] - 41) <= 2
+
+def test_detect_rects_filters_extreme_aspect_ratio():
+    # 模拟 200x200 图像中的扫描边缘长条阴影 (180x3, 长宽比 60:1)
+    thresh = np.zeros((200, 200), dtype=np.uint8)
+    thresh[0:3, 10:190] = 255
+    rects, filtered = ImageCropper.detect_rects(thresh, min_area_pct=0.5, max_area_pct=80.0, padding=0)
+    assert len(rects) == 0
+    assert filtered == 1
+
