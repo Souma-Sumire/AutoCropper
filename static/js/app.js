@@ -1373,9 +1373,13 @@ function undo() {
     fileData.redoStack.push(currentSnap);
 
     const prevState = fileData.undoStack.pop();
-    fileData.rects = JSON.parse(JSON.stringify(prevState.rects));
-    fileData.selectedCropIndex = prevState.selectedCropIndex;
-    fileData.selectedCropIndices = new Set(prevState.selectedCropIndices || [prevState.selectedCropIndex]);
+    fileData.rects = JSON.parse(JSON.stringify(prevState.rects || []));
+    const validPrevIndices = (prevState.selectedCropIndices || (prevState.selectedCropIndex >= 0 ? [prevState.selectedCropIndex] : []))
+        .filter(i => i >= 0 && i < fileData.rects.length);
+    fileData.selectedCropIndices = new Set(validPrevIndices);
+    fileData.selectedCropIndex = (fileData.selectedCropIndices.size > 0)
+        ? Array.from(fileData.selectedCropIndices)[0]
+        : (fileData.rects.length > 0 ? 0 : -1);
 
     updateFileUiAfterRectsChange();
     log(`[${fileData.name}] 撤销操作 (Ctrl+Z)`);
@@ -1394,9 +1398,13 @@ function redo() {
     fileData.undoStack.push(currentSnap);
 
     const nextState = fileData.redoStack.pop();
-    fileData.rects = JSON.parse(JSON.stringify(nextState.rects));
-    fileData.selectedCropIndex = nextState.selectedCropIndex;
-    fileData.selectedCropIndices = new Set(nextState.selectedCropIndices || [nextState.selectedCropIndex]);
+    fileData.rects = JSON.parse(JSON.stringify(nextState.rects || []));
+    const validNextIndices = (nextState.selectedCropIndices || (nextState.selectedCropIndex >= 0 ? [nextState.selectedCropIndex] : []))
+        .filter(i => i >= 0 && i < fileData.rects.length);
+    fileData.selectedCropIndices = new Set(validNextIndices);
+    fileData.selectedCropIndex = (fileData.selectedCropIndices.size > 0)
+        ? Array.from(fileData.selectedCropIndices)[0]
+        : (fileData.rects.length > 0 ? 0 : -1);
 
     updateFileUiAfterRectsChange();
     log(`[${fileData.name}] 重做操作 (Ctrl+Y)`);
@@ -1939,11 +1947,17 @@ function handleCanvasMouseDown(e, fileId, canvas) {
     const hit = hitTest(x, y, fileId, canvas);
     const pendingSnapshot = createSnapshot(fileId);
 
+    const isCtrl = e.ctrlKey || e.metaKey;
     const isShift = e.shiftKey;
     const isAlt = e.altKey;
 
+    if (document.activeElement && document.activeElement.blur && document.activeElement !== document.body) {
+        document.activeElement.blur();
+    }
+
     if (!fileData.selectedCropIndices) fileData.selectedCropIndices = new Set();
 
+    // 1. Alt + 拖拽：新建排除区
     if (isAlt) {
         e.preventDefault();
         transformState = {
@@ -1959,6 +1973,29 @@ function handleCanvasMouseDown(e, fileId, canvas) {
         return;
     }
 
+    // 2. Ctrl + 拖拽：新建有效裁剪框（只有按住 Ctrl 才可以框选创建新框）
+    if (isCtrl) {
+        e.preventDefault();
+        if (fileData.selectedCropIndices.size > 0) {
+            fileData.selectedCropIndices.clear();
+            fileData.selectedCropIndex = -1;
+            drawCanvas(fileId);
+            renderCropPreviews(fileId);
+        }
+        transformState = {
+            mode: 'drawing_new',
+            drawType: 'include',
+            startX: x,
+            startY: y,
+            currentX: x,
+            currentY: y,
+            pendingSnapshot,
+            hasModified: false
+        };
+        return;
+    }
+
+    // 3. 正常操作：调节控制点、旋转手柄、移动已有框
     if (hit.type === 'handle') {
         e.preventDefault();
         transformState = {
@@ -2037,22 +2074,14 @@ function handleCanvasMouseDown(e, fileId, canvas) {
                 hasModified: false
             };
         } else {
+            // 普通无修饰键单击空白处：仅取消选择，严禁直接新建框选
             if (fileData.selectedCropIndices.size > 0) {
                 fileData.selectedCropIndices.clear();
                 fileData.selectedCropIndex = -1;
                 drawCanvas(fileId);
                 renderCropPreviews(fileId);
             }
-            transformState = {
-                mode: 'drawing_new',
-                drawType: 'include',
-                startX: x,
-                startY: y,
-                currentX: x,
-                currentY: y,
-                pendingSnapshot,
-                hasModified: false
-            };
+            transformState = { mode: 'none' };
         }
     }
 }
@@ -2075,7 +2104,7 @@ function bindCanvasEvents(canvas, fileId) {
 
         if (transformState.mode === 'none') {
             const hit = hitTest(x, y, fileId, canvas);
-            if (e.altKey) {
+            if (e.ctrlKey || e.metaKey || e.altKey) {
                 canvas.style.cursor = 'crosshair';
             } else if (hit.type === 'handle') {
                 canvas.style.cursor = getHandleCursor(hit.info, hit.index);
@@ -2261,6 +2290,9 @@ window.addEventListener('mouseup', (e) => {
         const h0 = Math.abs(y - transformState.startY);
 
         if (w0 >= 15 && h0 >= 15) {
+            if (transformState.pendingSnapshot) {
+                pushUndoState(currentFileId, transformState.pendingSnapshot);
+            }
             const isExclude = transformState.drawType === 'exclude';
             const newRect = {
                 x: Math.round(x0),
@@ -2353,20 +2385,21 @@ window.addEventListener('keydown', (e) => {
     if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
     const isCtrl = e.ctrlKey || e.metaKey;
-    const key = e.key.toLowerCase();
+    const key = e.key ? e.key.toLowerCase() : '';
+    const code = e.code || '';
 
-    if (isCtrl && key === 'a') {
+    if (isCtrl && (key === 'a' || code === 'KeyA')) {
         e.preventDefault();
         selectAllCrops();
         return;
     }
-    if (isCtrl && key === 'z') {
+    if (isCtrl && (key === 'z' || code === 'KeyZ')) {
         e.preventDefault();
         if (e.shiftKey) redo();
         else undo();
         return;
     }
-    if (isCtrl && key === 'y') {
+    if (isCtrl && (key === 'y' || code === 'KeyY')) {
         e.preventDefault();
         redo();
         return;

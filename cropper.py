@@ -45,7 +45,9 @@ class ImageCropper:
             valid_pixels = blurred[blurred < 242]
             if valid_pixels.size > 100:
                 otsu_val, _ = cv2.threshold(valid_pixels, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-                return int(max(60, min(185, round(otsu_val))))
+                # 适度向上偏置补偿（上限 190），确保老照片浅色天空、高光区域以及白色纸边不被误判为背景
+                boosted_otsu = round(otsu_val * 1.10)
+                return int(max(60, min(190, boosted_otsu)))
         thresh_type = cv2.THRESH_BINARY_INV if bg_type == "light" else cv2.THRESH_BINARY
         otsu_val, _ = cv2.threshold(blurred, 0, 255, thresh_type + cv2.THRESH_OTSU)
         return int(round(otsu_val))
@@ -72,7 +74,7 @@ class ImageCropper:
                 valid_pixels = blurred[blurred < 242]
                 if valid_pixels.size > 100:
                     otsu_val, _ = cv2.threshold(valid_pixels, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-                    clamped_thresh = int(max(60, min(185, round(otsu_val))))
+                    clamped_thresh = int(max(60, min(190, round(otsu_val * 1.10))))
                     _, thresh = cv2.threshold(blurred, clamped_thresh, 255, cv2.THRESH_BINARY_INV)
                 else:
                     _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
@@ -123,10 +125,10 @@ class ImageCropper:
             rect_area = rw * rh
             contour_area = cv2.contourArea(c)
 
-            # 核心约束 1: 实心度 (Solidity) 过滤。真实照片轮廓与其最小外接矩形高度填充；
-            # 滤除由斜纹/布纹离散噪点构成的空心散乱怪框
+            # 核心约束 1: 实心度 (Solidity) 过滤。容许天空浅白部分及照片花边相框（放宽至 0.40），
+            # 同时有效滤除由斜纹/布纹离散噪点构成的空心散乱怪框
             solidity = contour_area / max(1.0, rect_area)
-            if solidity < 0.60:
+            if solidity < 0.40:
                 filtered_count += 1
                 continue
 
