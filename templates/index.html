@@ -18,13 +18,7 @@
                         <button id="clearAllBtn" class="btn-secondary" style="width: 52px;" title="清空全部已载入文件">清空</button>
                     </div>
                 </div>
-                <div id="batchSummary" class="summary-badge">[ 已载入: 0 个文件 | 共 0 张子图 ]</div>
-                <div id="importProgress" class="import-progress" hidden>
-                    <div id="importProgressText" class="import-progress-text">准备导入…</div>
-                    <div class="import-progress-track">
-                        <div id="importProgressFill" class="import-progress-fill"></div>
-                    </div>
-                </div>
+                <div id="batchSummary" class="summary-badge">0 个文件 · 共 0 张子图</div>
                 <div id="fileListContainer" class="file-list-box"></div>
             </div>
 
@@ -64,8 +58,8 @@
             <!-- 核心画布显示区 -->
             <div class="canvas-viewport" id="canvasViewport">
                 <div class="upload-dropzone" id="dropZone">
-                    <div class="drop-title">[ 拖拽任意数量扫描件至此窗口 ]</div>
-                    <div class="drop-sub">支持多图批量导入与自动识别 | 或点击左侧“添加本地图片”</div>
+                    <div class="drop-title">拖拽扫描件至此区域</div>
+                    <div class="drop-sub">支持批量导入与多图自动识别，或点击左侧“添加本地图片”</div>
                 </div>
 
                 <!-- 连续级联多图流容器：支持滚轮连续通览所有扫描件 -->
@@ -97,7 +91,7 @@
 
     <!-- 全局拖放遮罩层 -->
     <div id="dragOverlay" class="drag-overlay" style="display: none;">
-        <div class="drag-overlay-box">[ 释放鼠标以批量导入扫描件 ]</div>
+        <div class="drag-overlay-box">释放鼠标以导入扫描件</div>
     </div>
 
     <!-- 犄角旮旯：右下角极简控制台浮动停靠栏与浮窗 -->

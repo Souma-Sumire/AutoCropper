@@ -7,14 +7,11 @@ let isImporting = false;
 let isConsoleOpen = false;
 
 // DOM 节点 - 左侧面板
+// DOM 节点 - 左侧面板
 const fileInput = document.getElementById('fileInput');
 const uploadBtn = document.getElementById('uploadBtn');
 const clearAllBtn = document.getElementById('clearAllBtn');
-const fileMeta = document.getElementById('fileMeta');
 const batchSummary = document.getElementById('batchSummary');
-const importProgress = document.getElementById('importProgress');
-const importProgressText = document.getElementById('importProgressText');
-const importProgressFill = document.getElementById('importProgressFill');
 const fileListContainer = document.getElementById('fileListContainer');
 const exportTypeSelect = document.getElementById('exportType');
 const exportFormatSelect = document.getElementById('exportFormat');
@@ -23,13 +20,10 @@ const flatExportCheck = document.getElementById('flatExport');
 const exportBtn = document.getElementById('exportBtn');
 
 // DOM 节点 - 中间视口
-const tabItems = document.querySelectorAll('.tab-item');
-const viewportInfo = document.getElementById('viewportInfo');
 const canvasViewport = document.getElementById('canvasViewport');
 const streamContainer = document.getElementById('streamContainer');
 const dropZone = document.getElementById('dropZone');
 const mainCanvas = document.getElementById('mainCanvas');
-const cropPreviewStrip = document.getElementById('cropPreviewStrip');
 const statusbarMsg = document.getElementById('statusbarMsg');
 const consoleToggle = document.getElementById('consoleToggle');
 const consoleDrawer = document.getElementById('consoleDrawer');
@@ -203,13 +197,7 @@ function setImportUi(active, current = 0, total = 0, name = '', detail = '') {
     isImporting = active;
     if (active) {
         if (viewportLoading) viewportLoading.style.display = 'flex';
-        importProgress.hidden = false;
         const pct = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
-        
-        importProgressFill.style.width = `${pct}%`;
-        importProgressText.textContent = total
-            ? `导入中 [${Math.min(total, Math.ceil(current))}/${total}]：${name}`
-            : '准备导入…';
 
         if (loadingProgressFill) loadingProgressFill.style.width = `${pct}%`;
         if (loadingPercentText) loadingPercentText.innerText = `${pct}%`;
@@ -219,12 +207,9 @@ function setImportUi(active, current = 0, total = 0, name = '', detail = '') {
 
         uploadBtn.disabled = true;
         uploadBtn.textContent = total ? `导入中 ${Math.min(total, Math.ceil(current))}/${total}` : '导入中…';
-        fileMeta.innerText = total ? `正在载入: ${name}` : '正在导入文件…';
         setExportBusy(true, '导入中…');
     } else {
         if (viewportLoading) viewportLoading.style.display = 'none';
-        importProgress.hidden = true;
-        importProgressFill.style.width = '0%';
         if (loadingProgressFill) loadingProgressFill.style.width = '0%';
         uploadBtn.disabled = false;
         uploadBtn.textContent = '添加本地图片';
@@ -240,7 +225,9 @@ function updateBatchSummary() {
         const validRects = (filesMap[id].rects || []).filter(r => !r.excluded);
         totalCrops += validRects.length;
     });
-    batchSummary.innerText = `[ 已载入: ${totalFiles} 个文件 | 共 ${totalCrops} 张子图 ]`;
+    if (batchSummary) {
+        batchSummary.innerText = `${totalFiles} 个文件 · 共 ${totalCrops} 张子图`;
+    }
 }
 
 function setFileDebugMode(fileId, mode) {
@@ -257,10 +244,6 @@ function setFileDebugMode(fileId, mode) {
 
     if (fid === currentFileId) {
         currentDebugMode = mode;
-        tabItems.forEach(t => {
-            if (t.getAttribute('data-mode') === mode) t.classList.add('active');
-            else t.classList.remove('active');
-        });
     }
 
     const modeName = mode === 'original' ? '原图与选框' : mode === 'threshold' ? '二值化调试' : '灰度模糊';
@@ -273,20 +256,6 @@ function setFileDebugMode(fileId, mode) {
         requestPreview(fid);
     }
 }
-
-// 顶部标签切换：同步当前聚焦图片模式
-tabItems.forEach(tab => {
-    tab.addEventListener('click', () => {
-        const mode = tab.getAttribute('data-mode');
-        if (currentFileId) {
-            setFileDebugMode(currentFileId, mode);
-        } else {
-            currentDebugMode = mode;
-            tabItems.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-        }
-    });
-});
 
 // 犄角旮旯：右下角控制台弹层控制
 const closeLogBtn = document.getElementById('closeLogBtn');
@@ -330,9 +299,6 @@ if (clearAllBtn) {
             streamContainer.style.display = 'none';
         }
         dropZone.style.display = 'block';
-        if (cropPreviewStrip) cropPreviewStrip.innerHTML = '<div class="empty-hint">暂无检出子图</div>';
-        viewportInfo.innerText = '未选择文件';
-        fileMeta.innerText = '等待文件载入...';
         setExportBusy(false);
         log('已清空所有图片数据。');
     });
@@ -491,9 +457,6 @@ async function handleFiles(files) {
         }
     } finally {
         setImportUi(false);
-        if (Object.keys(filesMap).length > 0 && currentFileId) {
-            fileMeta.innerText = `当前: ${filesMap[currentFileId].name} (${filesMap[currentFileId].width}×${filesMap[currentFileId].height})`;
-        }
     }
 }
 
@@ -569,11 +532,8 @@ function renderStreamContainer() {
                         <canvas id="canvas-${fileId}" class="stream-canvas"></canvas>
                     </div>
                     <div class="stream-crops-box">
-                        <div class="stream-crops-header">
-                            <span>切片预览 (#${validCount})</span>
-                        </div>
                         <div class="stream-crop-strip" id="crop-strip-${fileId}">
-                            <div class="empty-hint">暂无检出子图</div>
+                            <div class="empty-hint">暂无子图</div>
                         </div>
                     </div>
                 </div>
@@ -608,7 +568,6 @@ function renderStreamContainer() {
                     <div class="ctrl-group">
                         <div class="ctrl-label-row">
                             <span>二值化阈值</span>
-                            <span id="threshValLabel-${fileId}" class="val-badge">${threshBadgeText}</span>
                         </div>
                         <div class="ctrl-input-row">
                             <input type="range" id="threshold-${fileId}" min="0" max="255" value="${item.params.threshold}" class="range-input" ${threshDisabledAttr} ${threshDisabledStyle}>
@@ -651,18 +610,18 @@ function renderStreamContainer() {
                         </div>
                     </div>
                     <div class="tool-divider"></div>
-                    <div class="tool-grid full">
-                        <button id="autoOrientBtn-${fileId}" class="btn-action">自动纠正所有朝向</button>
+                    <div class="tool-grid">
+                        <button id="reDetectBtn-${fileId}" class="btn-tool" title="以当前参数重新检测">重新检测</button>
+                        <button id="syncParamsBtn-${fileId}" class="btn-tool" title="将当前参数同步到所有图片">同步至全部</button>
                     </div>
                     <div class="tool-grid">
-                        <button id="mergeCropsBtn-${fileId}" class="btn-tool" title="合并选中的多个框 (快捷键: M)">合并多框 (M)</button>
                         <button id="selectAllBtn-${fileId}" class="btn-tool" title="全选当前图片的所有裁剪框 (快捷键: Ctrl+A)">全选 (Ctrl+A)</button>
+                        <button id="mergeCropsBtn-${fileId}" class="btn-tool" title="合并选中的多个框 (快捷键: M)">合并多框 (M)</button>
                     </div>
                     <div class="tool-grid">
+                        <button id="autoOrientBtn-${fileId}" class="btn-tool" title="自动判断并纠正所有照片朝向">纠正朝向</button>
                         <button id="delCropBtn-${fileId}" class="btn-tool danger" title="删除选中的裁剪框 (快捷键: Delete)">删除选中框</button>
-                        <button id="reDetectBtn-${fileId}" class="btn-tool" title="重新自动检测">重新检测</button>
                     </div>
-                    <button id="syncParamsBtn-${fileId}" class="btn-secondary" style="margin-top: 4px;">同步此图参数到所有图片</button>
                 </div>
             `;
 
@@ -695,8 +654,6 @@ function renderStreamContainer() {
                 if (btn.getAttribute('data-mode') === itemMode) btn.classList.add('active');
                 else btn.classList.remove('active');
             });
-            const cropHeader = pageEl.querySelector('.stream-crops-header span');
-            if (cropHeader) cropHeader.innerText = `切片预览 (#${validCount})`;
             if (fileId === currentFileId) {
                 pageEl.classList.add('active');
             } else {
@@ -749,11 +706,11 @@ function bindCardEvents(fileId) {
         }, isSlider ? 100 : 20);
     };
 
-    if (threshRange && threshNum && threshLabel) {
+    if (threshRange && threshNum) {
         threshRange.addEventListener('input', (e) => {
             const v = parseInt(e.target.value) || 0;
             threshNum.value = v;
-            threshLabel.innerText = v;
+            if (threshLabel) threshLabel.innerText = v;
             fileData.params.threshold = v;
             triggerUpdate(true);
         });
@@ -761,7 +718,7 @@ function bindCardEvents(fileId) {
             const v = Math.max(0, Math.min(255, parseInt(e.target.value) || 0));
             threshRange.value = v;
             threshNum.value = v;
-            threshLabel.innerText = v;
+            if (threshLabel) threshLabel.innerText = v;
             fileData.params.threshold = v;
             requestPreview(fileId, false);
         });
@@ -855,11 +812,11 @@ function bindCardEvents(fileId) {
         });
     });
 
-    if (morphRange && morphNum && morphLabel) {
+    if (morphRange && morphNum) {
         morphRange.addEventListener('input', (e) => {
             const v = parseInt(e.target.value) || 0;
             morphNum.value = v;
-            morphLabel.innerText = v + ' px';
+            if (morphLabel) morphLabel.innerText = v + ' px';
             fileData.params.morph_size = v;
             triggerUpdate(true);
         });
@@ -867,7 +824,7 @@ function bindCardEvents(fileId) {
             const v = Math.max(0, Math.min(15, parseInt(e.target.value) || 0));
             morphRange.value = v;
             morphNum.value = v;
-            morphLabel.innerText = v + ' px';
+            if (morphLabel) morphLabel.innerText = v + ' px';
             fileData.params.morph_size = v;
             requestPreview(fileId, false);
         });
@@ -881,45 +838,45 @@ function bindCardEvents(fileId) {
         });
     }
 
-    if (minRange && minInput && minLabel) {
+    if (minRange && minInput) {
         minRange.addEventListener('input', (e) => {
             const v = parseFloat(e.target.value) || 0.05;
             minInput.value = v;
-            minLabel.innerText = v.toFixed(2) + '%';
+            if (minLabel) minLabel.innerText = v.toFixed(2) + '%';
             fileData.params.min_area_pct = v;
             triggerUpdate(true);
         });
         minInput.addEventListener('change', (e) => {
             const v = parseFloat(e.target.value) || 0.05;
             minRange.value = Math.min(20, v);
-            minLabel.innerText = v.toFixed(2) + '%';
+            if (minLabel) minLabel.innerText = v.toFixed(2) + '%';
             fileData.params.min_area_pct = v;
             requestPreview(fileId, false);
         });
     }
 
-    if (maxRange && maxInput && maxLabel) {
+    if (maxRange && maxInput) {
         maxRange.addEventListener('input', (e) => {
             const v = parseFloat(e.target.value) || 80.0;
             maxInput.value = v;
-            maxLabel.innerText = v.toFixed(1) + '%';
+            if (maxLabel) maxLabel.innerText = v.toFixed(1) + '%';
             fileData.params.max_area_pct = v;
             triggerUpdate(true);
         });
         maxInput.addEventListener('change', (e) => {
             const v = parseFloat(e.target.value) || 80.0;
             maxRange.value = v;
-            maxLabel.innerText = v.toFixed(1) + '%';
+            if (maxLabel) maxLabel.innerText = v.toFixed(1) + '%';
             fileData.params.max_area_pct = v;
             requestPreview(fileId, false);
         });
     }
 
-    if (padRange && padNum && padLabel) {
+    if (padRange && padNum) {
         padRange.addEventListener('input', (e) => {
             const v = parseInt(e.target.value) || 0;
             padNum.value = v;
-            padLabel.innerText = v + ' px';
+            if (padLabel) padLabel.innerText = v + ' px';
             fileData.params.padding = v;
             triggerUpdate(true);
         });
@@ -927,7 +884,7 @@ function bindCardEvents(fileId) {
             const v = parseInt(e.target.value) || 0;
             padRange.value = v;
             padNum.value = v;
-            padLabel.innerText = v + ' px';
+            if (padLabel) padLabel.innerText = v + ' px';
             fileData.params.padding = v;
             requestPreview(fileId, false);
         });
@@ -1097,13 +1054,6 @@ function selectFile(fileId, shouldScroll = false) {
 
     const mode = fileData.debugMode || 'original';
     currentDebugMode = mode;
-    tabItems.forEach(t => {
-        if (t.getAttribute('data-mode') === mode) t.classList.add('active');
-        else t.classList.remove('active');
-    });
-
-    fileMeta.innerText = `当前: ${fileData.name} (${fileData.width}×${fileData.height})`;
-    viewportInfo.innerText = `[${fileData.name}] ${fileData.width}×${fileData.height} | 检出 ${fileData.rects.length} 张`;
 
     if (!fileData.detected) {
         requestPreview(fileId);
@@ -1176,15 +1126,9 @@ function requestPreview(fileId, skipCropPreviews = false) {
         const validCount = (fileData.rects || []).filter(r => !r.excluded).length;
         const badge = document.getElementById(`badge-${targetId}`);
         if (badge) badge.innerText = validCount;
-        const pageBadge = document.getElementById(`page-badge-${targetId}`);
-        if (pageBadge) pageBadge.innerText = `检出 ${validCount} 张照片`;
 
         drawCanvas(targetId);
         if (!skipCropPreviews) renderCropPreviews(targetId);
-
-        if (targetId === currentFileId) {
-            viewportInfo.innerText = `[${fileData.name}] ${fileData.width}×${fileData.height} | 检出 ${validCount} 张`;
-        }
 
         updateBatchSummary();
     })
@@ -1220,15 +1164,10 @@ function silentRequestPreview(fileId) {
 
             const badge = document.getElementById(`badge-${fileId}`);
             if (badge) badge.innerText = data.rects.length;
-            const pageBadge = document.getElementById(`page-badge-${fileId}`);
-            if (pageBadge) pageBadge.innerText = `检出 ${data.rects.length} 张照片`;
 
             drawCanvas(fileId);
             renderCropPreviews(fileId);
 
-            if (fileId === currentFileId) {
-                viewportInfo.innerText = `[${fileData.name}] ${fileData.width}×${fileData.height} | 检出 ${data.rects.length} 张`;
-            }
             updateBatchSummary();
             log(`[${fileData.name}] 检出有效子图数: ${data.rects.length}`);
         }
@@ -1470,10 +1409,6 @@ function updateFileUiAfterRectsChange() {
     const validCount = (fileData.rects || []).filter(r => !r.excluded).length;
     const badge = document.getElementById(`badge-${currentFileId}`);
     if (badge) badge.innerText = validCount;
-
-    if (viewportInfo) {
-        viewportInfo.innerText = `[${fileData.name}] ${fileData.width}×${fileData.height}`;
-    }
 
     updateBatchSummary();
     drawCanvas(currentFileId);
