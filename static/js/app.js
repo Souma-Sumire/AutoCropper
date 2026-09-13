@@ -605,8 +605,8 @@ function renderStreamContainer() {
                     <div class="ctrl-group">
                         <div class="ctrl-label-row"><span>外扩边缘 (px)</span></div>
                         <div class="ctrl-input-row">
-                            <input type="range" id="padding-${fileId}" min="-50" max="50" value="${item.params.padding}" class="range-input">
-                            <input type="number" id="paddingNum-${fileId}" min="-50" max="50" value="${item.params.padding}" class="num-input">
+                            <input type="range" id="padding-${fileId}" min="-50" max="300" value="${item.params.padding}" class="range-input">
+                            <input type="number" id="paddingNum-${fileId}" min="-200" max="1000" value="${item.params.padding}" class="num-input">
                         </div>
                     </div>
                     <div class="tool-divider"></div>
