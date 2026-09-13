@@ -6,6 +6,22 @@ on:
       - 'v*'
       - '[0-9]+.*'
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '发布版本 Tag（例如 v1.0.0，留空则仅执行构建验证不发布）'
+        required: false
+        type: string
+        default: ''
+      draft:
+        description: '是否保存为草稿 (Draft)'
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: '是否设为预发布 (Pre-release)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -57,7 +73,11 @@ jobs:
 
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '')
         with:
+          tag_name: ${{ inputs.tag_name || github.ref_name }}
+          name: ${{ inputs.tag_name || github.ref_name }}
           files: dist/AutoCropper.exe
+          draft: ${{ inputs.draft || false }}
+          prerelease: ${{ inputs.prerelease || false }}
           generate_release_notes: true
