@@ -26,3 +26,9 @@ Thumbs.db
 # 开发总结与开发计划
 walkthrough.md
 docs/
+
+# PyInstaller 构建产物
+build/
+dist/
+*.spec
+

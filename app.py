@@ -1,4 +1,5 @@
 import os
+import sys
 import uuid
 import base64
 import zipfile
@@ -9,7 +10,17 @@ import numpy as np
 from flask import Flask, request, jsonify, send_file, render_template
 from cropper import ImageCropper
 
-app = Flask(__name__, template_folder='templates', static_folder='static')
+def get_resource_path(relative_path):
+    """获取资源绝对路径，兼容常规运行与 PyInstaller 单文件打包环境"""
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
+template_dir = get_resource_path('templates')
+static_dir = get_resource_path('static')
+app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
 
 UPLOAD_DIR = "temp_uploads"
 OUTPUT_DIR = "output"
@@ -360,4 +371,25 @@ def export_crops():
     return jsonify({"error": "不支持的导出类型"}), 400
 
 if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    import webbrowser
+    import threading
+
+    is_frozen = getattr(sys, 'frozen', False)
+
+    def open_browser():
+        time.sleep(1.2)
+        try:
+            webbrowser.open('http://127.0.0.1:5000')
+        except Exception:
+            pass
+
+    threading.Thread(target=open_browser, daemon=True).start()
+
+    print("=" * 60)
+    print("  AutoCropper 智能图像批量裁剪工作台")
+    print("  本地服务地址: http://127.0.0.1:5000")
+    print("  正在自动在浏览器中打开工作台...")
+    print("  提示: 保持此窗口开启即可正常使用，关闭此窗口即退出程序。")
+    print("=" * 60)
+
+    app.run(host='127.0.0.1', port=5000, debug=(not is_frozen))

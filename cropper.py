@@ -1,8 +1,17 @@
 import os
+import sys
 import math
 import time
 import cv2
 import numpy as np
+
+def get_resource_path(relative_path):
+    """获取资源绝对路径，兼容常规运行与 PyInstaller 单文件打包环境"""
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
 
 class ImageCropper:
     _face_detector = None
@@ -14,7 +23,7 @@ class ImageCropper:
             return None
         if cls._face_detector is not None:
             return cls._face_detector
-        model_path = os.path.join(os.path.dirname(__file__), "models", "face_detection_yunet.onnx")
+        model_path = get_resource_path(os.path.join("models", "face_detection_yunet.onnx"))
         if os.path.exists(model_path) and hasattr(cv2, "FaceDetectorYN_create"):
             try:
                 cls._face_detector = cv2.FaceDetectorYN_create(
