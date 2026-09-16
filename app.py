@@ -23,10 +23,44 @@ static_dir = get_resource_path('static')
 app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000
 
+import shutil
+
 UPLOAD_DIR = "temp_uploads"
 OUTPUT_DIR = "output"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+def cleanup_temp_uploads(max_age_hours=24):
+    """扫描并清理超过指定时长的临时上传会话目录，返回清理的目录数量与释放字节数"""
+    if not os.path.exists(UPLOAD_DIR):
+        return 0, 0
+    now = time.time()
+    max_age_sec = max_age_hours * 3600
+    cleaned_count = 0
+    freed_bytes = 0
+
+    try:
+        for entry in os.scandir(UPLOAD_DIR):
+            if entry.is_dir():
+                try:
+                    stat = entry.stat()
+                    # 判断文件夹最近修改时间是否超过指定时长
+                    if now - stat.st_mtime >= max_age_sec:
+                        dir_size = 0
+                        for root, _, files in os.walk(entry.path):
+                            for f in files:
+                                try:
+                                    dir_size += os.path.getsize(os.path.join(root, f))
+                                except Exception:
+                                    pass
+                        shutil.rmtree(entry.path, ignore_errors=True)
+                        cleaned_count += 1
+                        freed_bytes += dir_size
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return cleaned_count, freed_bytes
 
 @app.route('/')
 def index():
@@ -371,12 +405,50 @@ def export_crops():
 
     return jsonify({"error": "不支持的导出类型"}), 400
 
+@app.route('/api/clear_session', methods=['POST'])
+def clear_session():
+    data = request.get_json() or {}
+    sid = data.get("session_id")
+    if not sid:
+        return jsonify({"success": False, "error": "缺少 session_id"}), 400
+    session_path = os.path.join(UPLOAD_DIR, sid)
+    if os.path.exists(session_path):
+        shutil.rmtree(session_path, ignore_errors=True)
+        return jsonify({"success": True, "message": "会话临时文件已清除"})
+    return jsonify({"success": True, "message": "会话目录不存在或已被清理"})
+
+@app.route('/api/cleanup', methods=['POST'])
+def manual_cleanup():
+    data = request.get_json() or {}
+    max_age_hours = float(data.get("max_age_hours", 24))
+    count, freed = cleanup_temp_uploads(max_age_hours=max_age_hours)
+    freed_mb = round(freed / (1024 * 1024), 2)
+    return jsonify({
+        "success": True,
+        "cleaned_count": count,
+        "freed_mb": freed_mb,
+        "message": f"已清理 {count} 个临时会话，释放 {freed_mb} MB 磁盘空间。"
+    })
+
 if __name__ == '__main__':
     import webbrowser
     import threading
     import socket
 
     is_frozen = getattr(sys, 'frozen', False)
+
+    def start_cleanup_daemon():
+        count, freed = cleanup_temp_uploads(max_age_hours=24)
+        if count > 0:
+            print(f"  [清理] 已自动清理 {count} 个过期临时会话，释放 {freed / (1024 * 1024):.1f} MB 空间。")
+        while True:
+            time.sleep(3600)
+            try:
+                cleanup_temp_uploads(max_age_hours=24)
+            except Exception:
+                pass
+
+    threading.Thread(target=start_cleanup_daemon, daemon=True).start()
 
     def open_browser(host='127.0.0.1', port=5000, max_wait=6.0):
         start_time = time.time()

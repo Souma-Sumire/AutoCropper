@@ -101,3 +101,35 @@ def test_batch_api_workflow():
     flat_data = flat_res.get_json()
     assert '/' not in flat_data['images'][0]['path']
     assert flat_data['images'][0]['path'].startswith('scan1_')
+
+    # 8. 测试清除特定会话
+    clear_res = client.post('/api/clear_session', json={"session_id": session_id})
+    assert clear_res.status_code == 200
+    assert clear_res.get_json().get("success") is True
+
+    # 9. 校验会话清理后有效性
+    check_res = client.post('/api/check_session', json={"session_id": session_id})
+    assert check_res.get_json().get("valid") is False
+
+def test_cleanup_temp_uploads():
+    import os
+    import time
+    from app import cleanup_temp_uploads, UPLOAD_DIR
+
+    # 创建一个模拟的过期临时目录
+    fake_session_id = "test_expired_session_for_cleanup"
+    fake_dir = os.path.join(UPLOAD_DIR, fake_session_id)
+    os.makedirs(fake_dir, exist_ok=True)
+    fake_file = os.path.join(fake_dir, "temp.txt")
+    with open(fake_file, "w") as f:
+        f.write("dummy")
+
+    # 修改文件的修改时间为 48 小时前
+    past_time = time.time() - (48 * 3600)
+    os.utime(fake_dir, (past_time, past_time))
+    os.utime(fake_file, (past_time, past_time))
+
+    # 执行清理
+    cleaned_count, freed_bytes = cleanup_temp_uploads(max_age_hours=24)
+    assert cleaned_count >= 1
+    assert not os.path.exists(fake_dir)

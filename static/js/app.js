@@ -519,6 +519,14 @@ if (clearAllBtn) {
     clearAllBtn.addEventListener('click', () => {
         if (Object.keys(filesMap).length === 0) return;
         if (!confirm('确认清空所有已载入的图片吗？')) return;
+        if (sessionId) {
+            fetch('/api/clear_session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId })
+            }).catch(() => {});
+            sessionId = null;
+        }
         filesMap = {};
         currentFileId = null;
         renderFileList();
@@ -530,7 +538,7 @@ if (clearAllBtn) {
         }
         dropZone.style.display = 'block';
         setExportBusy(false);
-        log('已清空所有图片数据。');
+        log('已清空所有图片数据并释放本地临时缓存。');
     });
 }
 
