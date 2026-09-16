@@ -51,26 +51,50 @@ jobs:
         run: |
           python -m pytest tests/
 
-      - name: Build Standalone Executable via PyInstaller
+      - name: Build Standalone Executables via PyInstaller
         shell: pwsh
         run: |
+          # 1. 构建单文件版（带模块精简以降低解压体积与冷启动耗时）
           pyinstaller --noconfirm --clean --onefile `
             --name "AutoCropper" `
             --add-data "templates;templates" `
             --add-data "static;static" `
             --add-data "models;models" `
             --hidden-import "waitress" `
+            --exclude-module "tkinter" `
+            --exclude-module "unittest" `
+            --exclude-module "pydoc" `
             app.py
 
-      - name: Verify Executable
+          # 2. 构建免解压便携目录版（冷启动秒开，彻底免除 Temp 目录解压开销）
+          pyinstaller --noconfirm --clean --onedir `
+            --name "AutoCropper-Portable" `
+            --add-data "templates;templates" `
+            --add-data "static;static" `
+            --add-data "models;models" `
+            --hidden-import "waitress" `
+            --exclude-module "tkinter" `
+            --exclude-module "unittest" `
+            --exclude-module "pydoc" `
+            app.py
+
+          # 压缩便携目录为 zip 供极速启动用户直接使用
+          Compress-Archive -Path "dist/AutoCropper-Portable/*" -DestinationPath "dist/AutoCropper-Portable.zip" -Force
+
+      - name: Verify Executables
         shell: pwsh
         run: |
           if (-not (Test-Path "dist/AutoCropper.exe")) {
             Write-Error "dist/AutoCropper.exe not found!"
             exit 1
           }
-          $sizeMb = [math]::Round((Get-Item "dist/AutoCropper.exe").Length / 1MB, 2)
-          Write-Host "AutoCropper.exe generated successfully! Size: $sizeMb MB"
+          if (-not (Test-Path "dist/AutoCropper-Portable.zip")) {
+            Write-Error "dist/AutoCropper-Portable.zip not found!"
+            exit 1
+          }
+          $sizeOnefile = [math]::Round((Get-Item "dist/AutoCropper.exe").Length / 1MB, 2)
+          $sizeZip = [math]::Round((Get-Item "dist/AutoCropper-Portable.zip").Length / 1MB, 2)
+          Write-Host "Build complete! SingleFile: $sizeOnefile MB, Portable zip: $sizeZip MB"
 
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
@@ -78,7 +102,9 @@ jobs:
         with:
           tag_name: ${{ inputs.tag_name || github.ref_name }}
           name: ${{ inputs.tag_name || github.ref_name }}
-          files: dist/AutoCropper.exe
+          files: |
+            dist/AutoCropper.exe
+            dist/AutoCropper-Portable.zip
           draft: ${{ inputs.draft || false }}
           prerelease: ${{ inputs.prerelease || false }}
           generate_release_notes: true

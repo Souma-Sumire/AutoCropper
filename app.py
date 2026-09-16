@@ -21,6 +21,7 @@ def get_resource_path(relative_path):
 template_dir = get_resource_path('templates')
 static_dir = get_resource_path('static')
 app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000
 
 UPLOAD_DIR = "temp_uploads"
 OUTPUT_DIR = "output"
@@ -373,13 +374,20 @@ def export_crops():
 if __name__ == '__main__':
     import webbrowser
     import threading
+    import socket
 
     is_frozen = getattr(sys, 'frozen', False)
 
-    def open_browser():
-        time.sleep(1.2)
+    def open_browser(host='127.0.0.1', port=5000, max_wait=6.0):
+        start_time = time.time()
+        while time.time() - start_time < max_wait:
+            try:
+                with socket.create_connection((host, port), timeout=0.04):
+                    break
+            except (OSError, ConnectionRefusedError):
+                time.sleep(0.02)
         try:
-            webbrowser.open('http://127.0.0.1:5000')
+            webbrowser.open(f'http://{host}:{port}')
         except Exception:
             pass
 
