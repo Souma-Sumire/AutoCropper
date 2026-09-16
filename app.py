@@ -11,7 +11,7 @@ from flask import Flask, request, jsonify, send_file, render_template
 from cropper import ImageCropper
 
 def get_resource_path(relative_path):
-    """获取资源绝对路径，兼容常规运行与 PyInstaller 单文件打包环境"""
+    """获取资源绝对路径，兼容常规运行与 PyInstaller 打包环境"""
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         base_path = sys._MEIPASS
     else:
