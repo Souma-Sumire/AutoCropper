@@ -18,9 +18,10 @@ python app.py
 
 ## 构建可执行文件
 
-### 1. 安装打包工具
+### 1. 安装打包工具与完整依赖
 
 ```bash
+pip install -r requirements.txt
 pip install pyinstaller
 ```
 
