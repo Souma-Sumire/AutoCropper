@@ -392,4 +392,11 @@ if __name__ == '__main__':
     print("  提示: 保持此窗口开启即可正常使用，关闭此窗口即退出程序。")
     print("=" * 60)
 
-    app.run(host='127.0.0.1', port=5000, debug=(not is_frozen))
+    if is_frozen:
+        try:
+            from waitress import serve
+            serve(app, host='127.0.0.1', port=5000, threads=6)
+        except ImportError:
+            app.run(host='127.0.0.1', port=5000, debug=False)
+    else:
+        app.run(host='127.0.0.1', port=5000, debug=True)

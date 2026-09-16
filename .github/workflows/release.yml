@@ -59,6 +59,7 @@ jobs:
             --add-data "templates;templates" `
             --add-data "static;static" `
             --add-data "models;models" `
+            --hidden-import "waitress" `
             app.py
 
       - name: Verify Executable
