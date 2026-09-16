@@ -21,7 +21,7 @@ def get_resource_path(relative_path):
 template_dir = get_resource_path('templates')
 static_dir = get_resource_path('static')
 app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
-app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 import shutil
 

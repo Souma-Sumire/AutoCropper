@@ -1583,7 +1583,7 @@ function renderCropPreviews(targetFileId) {
             const orientLabel = formatOrientLabel(orient);
             const src = buildCropPreviewDataUrl(img, rect, autoRotate, fileData.params.bg_type);
             const badgeHtml = isExcluded
-                ? `<span class="flip-badge" style="background:#ff3b30;color:#fff;">排除</span>`
+                ? `<span class="flip-badge" style="background:#dc2626;color:#ffffff;">排除</span>`
                 : (orientLabel ? `<span class="flip-badge">${orientLabel}</span>` : '');
 
             const item = document.createElement('div');
@@ -1591,7 +1591,7 @@ function renderCropPreviews(targetFileId) {
             item.innerHTML = `
                 ${badgeHtml}
                 <img alt="crop ${index + 1}" src="${src}">
-                <span class="crop-label" style="${isExcluded ? 'color:#ff3b30;font-weight:bold;' : ''}">${isExcluded ? '[排] ' : ''}#${index + 1}${orientLabel ? ` · ${orientLabel}` : ''}</span>
+                <span class="crop-label" style="${isExcluded ? 'color:#dc2626;font-weight:600;' : ''}">${isExcluded ? '[排] ' : ''}#${index + 1}${orientLabel ? ` · ${orientLabel}` : ''}</span>
             `;
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -2783,9 +2783,10 @@ function drawCanvas(targetFileId) {
         canvasCtx.drawImage(img, 0, 0);
 
         if (fileMode === 'original') {
-            const strokeColor = '#ffff00';
-            const selectedColor = '#00e5ff';
-            const multiSelectColor = '#29b6f6';
+            const strokeColor = '#0284c7';
+            const selectedColor = '#2563eb';
+            const multiSelectColor = '#0ea5e9';
+            const dangerColor = '#dc2626';
             const rects = fileData.rects || [];
 
             const calculatedLineWidth = Math.max(2, Math.round(canvas.width / 350));
@@ -2802,7 +2803,7 @@ function drawCanvas(targetFileId) {
 
                 let currentStroke = strokeColor;
                 if (isExcluded) {
-                    currentStroke = isSelected ? '#ff3b30' : 'rgba(255, 59, 48, 0.85)';
+                    currentStroke = isSelected ? dangerColor : 'rgba(220, 38, 38, 0.85)';
                 } else if (isPrimary) {
                     currentStroke = selectedColor;
                 } else if (isSelected) {
@@ -2828,10 +2829,10 @@ function drawCanvas(targetFileId) {
                     canvasCtx.lineTo(pts[3][0], pts[3][1]);
                     canvasCtx.closePath();
                     if (isExcluded) {
-                        canvasCtx.fillStyle = 'rgba(255, 59, 48, 0.16)';
+                        canvasCtx.fillStyle = 'rgba(220, 38, 38, 0.16)';
                         canvasCtx.fill();
                     } else if (isSelected && !isPrimary) {
-                        canvasCtx.fillStyle = 'rgba(41, 182, 246, 0.1)';
+                        canvasCtx.fillStyle = 'rgba(37, 99, 235, 0.10)';
                         canvasCtx.fill();
                     }
                     canvasCtx.stroke();
@@ -2841,10 +2842,10 @@ function drawCanvas(targetFileId) {
                     minY = Math.min(pts[0][1], pts[1][1], pts[2][1], pts[3][1]);
                 } else {
                     if (isExcluded) {
-                        canvasCtx.fillStyle = 'rgba(255, 59, 48, 0.16)';
+                        canvasCtx.fillStyle = 'rgba(220, 38, 38, 0.16)';
                         canvasCtx.fillRect(rect.x, rect.y, rect.w, rect.h);
                     } else if (isSelected && !isPrimary) {
-                        canvasCtx.fillStyle = 'rgba(41, 182, 246, 0.1)';
+                        canvasCtx.fillStyle = 'rgba(37, 99, 235, 0.10)';
                         canvasCtx.fillRect(rect.x, rect.y, rect.w, rect.h);
                     }
                     canvasCtx.strokeRect(rect.x, rect.y, rect.w, rect.h);
@@ -2853,9 +2854,9 @@ function drawCanvas(targetFileId) {
                     minY = rect.y;
                 }
 
-                // 统一将识别结果标签固定在选框真实的物理左上角，颜色框直接与线连在一起，无额外描边
+                // 统一将识别结果标签固定在选框真实的物理左上角
                 canvasCtx.fillStyle = currentStroke;
-                canvasCtx.font = `bold ${fontSize}px Consolas, monospace`;
+                canvasCtx.font = `bold ${fontSize}px "JetBrains Mono", Consolas, monospace`;
                 const textWidth = canvasCtx.measureText(label).width;
 
                 const rectH = fontSize + (paddingOffset * 2);
@@ -2864,12 +2865,12 @@ function drawCanvas(targetFileId) {
                 const labelY = (minY - rectH >= 0) ? (minY - rectH) : minY;
 
                 canvasCtx.fillRect(labelX, labelY, rectW, rectH);
-                canvasCtx.fillStyle = isExcluded ? '#ffffff' : '#000000';
+                canvasCtx.fillStyle = '#ffffff';
                 canvasCtx.fillText(label, labelX + paddingOffset, labelY + fontSize);
 
                 if (isPrimary && fileId === currentFileId) {
                     canvasCtx.fillStyle = '#ffffff';
-                    canvasCtx.strokeStyle = isExcluded ? '#ff3b30' : '#007acc';
+                    canvasCtx.strokeStyle = isExcluded ? dangerColor : '#1d4ed8';
                     canvasCtx.lineWidth = 2;
 
                     hInfo.handles.forEach(hp => {
@@ -2879,7 +2880,7 @@ function drawCanvas(targetFileId) {
 
                     canvasCtx.beginPath();
                     canvasCtx.arc(hInfo.cx, hInfo.cy, handlePx / 2.5, 0, Math.PI * 2);
-                    canvasCtx.fillStyle = isExcluded ? '#ff3b30' : selectedColor;
+                    canvasCtx.fillStyle = isExcluded ? dangerColor : selectedColor;
                     canvasCtx.fill();
                     canvasCtx.stroke();
                 }
@@ -2892,11 +2893,11 @@ function drawCanvas(targetFileId) {
                 const h0 = Math.abs(transformState.currentY - transformState.startY);
 
                 canvasCtx.save();
-                canvasCtx.strokeStyle = '#29b6f6';
+                canvasCtx.strokeStyle = '#0284c7';
                 canvasCtx.lineWidth = 1.5;
                 canvasCtx.setLineDash([4, 4]);
                 canvasCtx.strokeRect(x0, y0, w0, h0);
-                canvasCtx.fillStyle = 'rgba(41, 182, 246, 0.15)';
+                canvasCtx.fillStyle = 'rgba(2, 132, 199, 0.12)';
                 canvasCtx.fillRect(x0, y0, w0, h0);
                 canvasCtx.restore();
             } else if (fileId === currentFileId && transformState && transformState.mode === 'drawing_new') {
@@ -2907,11 +2908,11 @@ function drawCanvas(targetFileId) {
 
                 const isExcludeDraw = transformState.drawType === 'exclude';
                 canvasCtx.save();
-                canvasCtx.strokeStyle = isExcludeDraw ? '#ff3b30' : '#00e5ff';
+                canvasCtx.strokeStyle = isExcludeDraw ? dangerColor : selectedColor;
                 canvasCtx.lineWidth = calculatedLineWidth;
                 canvasCtx.setLineDash([8, 6]);
                 canvasCtx.strokeRect(x0, y0, w0, h0);
-                canvasCtx.fillStyle = isExcludeDraw ? 'rgba(255, 59, 48, 0.22)' : 'rgba(0, 229, 255, 0.15)';
+                canvasCtx.fillStyle = isExcludeDraw ? 'rgba(220, 38, 38, 0.18)' : 'rgba(37, 99, 235, 0.15)';
                 canvasCtx.fillRect(x0, y0, w0, h0);
                 canvasCtx.restore();
             }
