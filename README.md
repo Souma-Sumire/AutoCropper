@@ -15,3 +15,23 @@ python app.py
 ```
 
 浏览器打开 [http://127.0.0.1:5000](http://127.0.0.1:5000)。
+
+## 构建可执行文件
+
+### 1. 安装打包工具
+
+```bash
+pip install pyinstaller
+```
+
+### 2. 执行打包
+
+**Windows**：
+
+```bash
+pyinstaller --noconfirm --clean --onefile --name "AutoCropper" --add-data "templates;templates" --add-data "static;static" --add-data "models;models" --hidden-import "waitress" app.py
+```
+
+> 注：若使用 Linux/macOS，将 `--add-data` 中的分号 `;` 替换为冒号 `:` 即可。
+
+打包完成后，独立单文件可执行程序生成于 `dist/` 目录（例如 `dist/AutoCropper.exe`）。
