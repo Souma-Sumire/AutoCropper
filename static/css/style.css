@@ -89,6 +89,17 @@ body {
     user-select: none;
 }
 
+/* 全局严禁页面内任何图片被鼠标拖拽，杜绝误触发导入流程 */
+img {
+    -webkit-user-drag: none;
+    -khtml-user-drag: none;
+    -moz-user-drag: none;
+    -o-user-drag: none;
+    user-drag: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
 /* 全局微型细滚动条（宽 4px，高 4px） */
 *::-webkit-scrollbar {
     width: 4px;

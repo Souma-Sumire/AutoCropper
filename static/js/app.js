@@ -638,6 +638,22 @@ if (clearAllBtn) {
 
 // 全局彻底拦截浏览器默认拖放行为，防止在标签页中直接打开图片
 let dragCounter = 0;
+let isInternalDragging = false;
+
+// 彻底禁止页面内图片等元素的内部拖拽，避免误触发操作系统外部文件导入流程
+window.addEventListener('dragstart', (e) => {
+    isInternalDragging = true;
+    if (e.target && (e.target.tagName === 'IMG' || e.target.closest('.crop-preview-item, .stream-container, .workbench-layout'))) {
+        e.preventDefault();
+        return false;
+    }
+}, true);
+
+window.addEventListener('dragend', () => {
+    isInternalDragging = false;
+    dragCounter = 0;
+    if (dragOverlay) dragOverlay.style.display = 'none';
+}, true);
 
 ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(evtName => {
     window.addEventListener(evtName, (e) => {
@@ -650,7 +666,9 @@ let dragCounter = 0;
 
 window.addEventListener('dragenter', (e) => {
     e.preventDefault();
-    if (e.dataTransfer && e.dataTransfer.types && Array.from(e.dataTransfer.types).includes('Files')) {
+    if (isInternalDragging) return;
+    const types = e.dataTransfer ? Array.from(e.dataTransfer.types || []) : [];
+    if (types.includes('Files')) {
         dragCounter++;
         if (dragOverlay) dragOverlay.style.display = 'flex';
     }
@@ -658,6 +676,10 @@ window.addEventListener('dragenter', (e) => {
 
 window.addEventListener('dragover', (e) => {
     e.preventDefault();
+    if (isInternalDragging) {
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+        return;
+    }
     if (e.dataTransfer) {
         e.dataTransfer.dropEffect = 'copy';
     }
@@ -665,6 +687,7 @@ window.addEventListener('dragover', (e) => {
 
 window.addEventListener('dragleave', (e) => {
     e.preventDefault();
+    if (isInternalDragging) return;
     dragCounter--;
     if (dragCounter <= 0) {
         dragCounter = 0;
@@ -676,6 +699,10 @@ window.addEventListener('drop', (e) => {
     e.preventDefault();
     dragCounter = 0;
     if (dragOverlay) dragOverlay.style.display = 'none';
+    if (isInternalDragging) {
+        isInternalDragging = false;
+        return;
+    }
     const dt = e.dataTransfer;
     if (dt && dt.files && dt.files.length > 0) {
         handleFiles(dt.files);
@@ -686,12 +713,20 @@ if (dropZone) {
     dropZone.addEventListener('click', () => fileInput.click());
     dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
+        if (isInternalDragging) {
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+            return;
+        }
         if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
     }, false);
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dragCounter = 0;
         if (dragOverlay) dragOverlay.style.display = 'none';
+        if (isInternalDragging) {
+            isInternalDragging = false;
+            return;
+        }
         const dt = e.dataTransfer;
         if (dt && dt.files && dt.files.length > 0) {
             handleFiles(dt.files);
@@ -1706,9 +1741,10 @@ function renderCropPreviews(targetFileId) {
 
             const item = document.createElement('div');
             item.className = 'crop-preview-item' + (isSelected ? ' selected' : '') + (isExcluded ? ' excluded' : '');
+            item.draggable = false;
             item.innerHTML = `
                 ${badgeHtml}
-                <img alt="crop ${index + 1}" src="${src}">
+                <img alt="crop ${index + 1}" src="${src}" draggable="false">
                 <span class="crop-label" style="${isExcluded ? 'color:#dc2626;font-weight:600;' : ''}">${isExcluded ? '[排] ' : ''}#${index + 1}${orientLabel ? ` · ${orientLabel}` : ''}</span>
             `;
             item.addEventListener('click', (e) => {
