@@ -436,6 +436,38 @@ class ImageCropper:
         return cropped
 
     @staticmethod
+    def rotate_rects_180(rects, img_w, img_h):
+        """将选框坐标在大图旋转180度后进行几何映射，并将朝向调整180度"""
+        transformed = []
+        for r in rects:
+            nr = dict(r)
+            w = int(r.get("w", 0))
+            h = int(r.get("h", 0))
+            x = int(r.get("x", 0))
+            y = int(r.get("y", 0))
+            nr["x"] = max(0, img_w - x - w)
+            nr["y"] = max(0, img_h - y - h)
+            nr["w"] = w
+            nr["h"] = h
+
+            if "rotated" in r and r["rotated"]:
+                rot = dict(r["rotated"])
+                cx = float(rot.get("cx", 0))
+                cy = float(rot.get("cy", 0))
+                rot["cx"] = float(img_w) - cx
+                rot["cy"] = float(img_h) - cy
+                if "points" in rot and rot["points"]:
+                    rot["points"] = [[float(img_w) - p[0], float(img_h) - p[1]] for p in rot["points"]]
+                nr["rotated"] = rot
+
+            old_orient = int(r.get("orient", 0) or 0)
+            nr["orient"] = (old_orient + 180) % 360
+            if "flip180" in nr:
+                nr["flip180"] = not nr["flip180"]
+            transformed.append(nr)
+        return transformed
+
+    @staticmethod
     def format_crop_name(template, original_name, index, ext="jpg"):
         """
         根据模板生成文件名。

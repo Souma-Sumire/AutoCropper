@@ -301,4 +301,115 @@ def test_dialog_apis(client, monkeypatch):
     assert folder_res.status_code == 200
     assert folder_res.get_json()['folder'] == 'D:\\TestFolder'
 
+def test_rotate_rects_180():
+    """测试 180 度几何与朝向变换"""
+    rects = [
+        {
+            "x": 20, "y": 30, "w": 100, "h": 200, "orient": 180,
+            "rotated": {
+                "cx": 70, "cy": 130, "w": 100, "h": 200, "angle": 15.0,
+                "points": [[20, 30], [120, 30], [120, 230], [20, 230]]
+            }
+        },
+        {
+            "x": 50, "y": 80, "w": 60, "h": 70, "orient": 0
+        }
+    ]
+    transformed = ImageCropper.rotate_rects_180(rects, img_w=800, img_h=600)
+    assert len(transformed) == 2
+
+    # 原本 180 度的切片倒置后变 0 度正向
+    assert transformed[0]["orient"] == 0
+    assert transformed[0]["x"] == 800 - 20 - 100  # 680
+    assert transformed[0]["y"] == 600 - 30 - 200  # 370
+    assert transformed[0]["w"] == 100
+    assert transformed[0]["h"] == 200
+    assert transformed[0]["rotated"]["cx"] == 800 - 70
+    assert transformed[0]["rotated"]["cy"] == 600 - 130
+
+    # 原本 0 度的切片倒置后变为 180 度
+    assert transformed[1]["orient"] == 180
+    assert transformed[1]["x"] == 800 - 50 - 60
+    assert transformed[1]["y"] == 600 - 80 - 70
+
+def test_auto_orient_inverts_large_image_when_majority_inverted(client, monkeypatch):
+    """测试超过半数切片倒置时触发大图翻转"""
+    img = np.full((300, 300, 3), 255, dtype=np.uint8)
+    img[20:100, 20:100] = [10, 20, 30]
+    ok, buf = cv2.imencode('.png', img)
+    assert ok
+
+    from io import BytesIO
+    upload_res = client.post(
+        '/api/upload',
+        data={'file': (BytesIO(buf.tobytes()), 'test_upside_down.png')},
+        content_type='multipart/form-data'
+    )
+    assert upload_res.status_code == 200
+    up_data = upload_res.get_json()
+    sid = up_data['session_id']
+    fid = up_data['file_id']
+
+    # 模拟 predict_orientation 返回 180 (倒置)
+    monkeypatch.setattr(ImageCropper, 'predict_orientation', lambda crop: 180)
+
+    # 3 个切片中有 2 个倒置 (> 50%)
+    rects = [
+        {"x": 10, "y": 10, "w": 50, "h": 50, "orient": 0},
+        {"x": 70, "y": 10, "w": 50, "h": 50, "orient": 0},
+        {"x": 10, "y": 70, "w": 50, "h": 50, "orient": 0}
+    ]
+
+    orient_res = client.post('/api/auto_orient', json={
+        'session_id': sid,
+        'file_id': fid,
+        'rects': rects,
+        'bg_type': 'light'
+    })
+    assert orient_res.status_code == 200
+    res_data = orient_res.get_json()
+    assert res_data['image_rotated'] is True
+    assert 'thumbnail' in res_data
+    assert len(res_data['rects']) == 3
+
+def test_preview_inverts_large_image_when_majority_inverted(client, monkeypatch):
+    """测试首次预览扫描时超过半数切片倒置自动翻转大图"""
+    img = np.full((400, 400, 3), 255, dtype=np.uint8)
+    img[30:120, 30:120] = [10, 20, 30]
+    img[30:120, 200:290] = [10, 20, 30]
+    ok, buf = cv2.imencode('.png', img)
+    assert ok
+
+    from io import BytesIO
+    upload_res = client.post(
+        '/api/upload',
+        data={'file': (BytesIO(buf.tobytes()), 'test_preview_upside_down.png')},
+        content_type='multipart/form-data'
+    )
+    assert upload_res.status_code == 200
+    up_data = upload_res.get_json()
+    sid = up_data['session_id']
+    fid = up_data['file_id']
+
+    # 模拟 predict_orientation 返回 180 (倒置)
+    monkeypatch.setattr(ImageCropper, 'predict_orientation', lambda crop: 180)
+
+    prev_res = client.post('/api/preview', json={
+        'session_id': sid,
+        'file_id': fid,
+        'threshold_mode': 'otsu',
+        'threshold': 200,
+        'blur_kernel': 3,
+        'morph_size': 3,
+        'min_area_pct': 0.1,
+        'max_area_pct': 90.0,
+        'allow_auto_invert': True
+    })
+    assert prev_res.status_code == 200
+    prev_data = prev_res.get_json()
+    assert prev_data['image_rotated'] is True
+    assert 'thumbnail' in prev_data
+
+
+
 

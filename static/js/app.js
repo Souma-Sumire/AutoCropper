@@ -1472,7 +1472,8 @@ function requestPreview(fileId, skipCropPreviews = false) {
         session_id: sessionId,
         file_id: targetId,
         ...fileData.params,
-        debug_mode: fileData.debugMode || 'original'
+        debug_mode: fileData.debugMode || 'original',
+        allow_auto_invert: !fileData.detected
     };
 
     fetch('/api/preview', {
@@ -1489,7 +1490,17 @@ function requestPreview(fileId, skipCropPreviews = false) {
             log(`调试识别出错: ${data.error}`);
             return;
         }
-        fileData.rects = mergeRectsPreserveFlip(fileData.rects, data.rects);
+
+        if (data.image_rotated && data.thumbnail) {
+            fileData.thumbnail = data.thumbnail;
+            fileData._cachedImg = null;
+            fileData.rects = data.rects;
+            const fileThumbImg = document.getElementById(`thumb-${targetId}`);
+            if (fileThumbImg) fileThumbImg.src = data.thumbnail;
+            showToast(`[${fileData.name}] 超过半数切片倒置，已自动翻转大图`, 3500);
+        } else {
+            fileData.rects = mergeRectsPreserveFlip(fileData.rects, data.rects);
+        }
         fileData.debugImgSrc = data.debug_image;
         fileData.detected = true;
 
@@ -1521,7 +1532,8 @@ function silentRequestPreview(fileId) {
         session_id: sessionId,
         file_id: fileId,
         ...fileData.params,
-        debug_mode: 'original'
+        debug_mode: 'original',
+        allow_auto_invert: !fileData.detected
     };
 
     return fetch('/api/preview', {
@@ -1532,7 +1544,16 @@ function silentRequestPreview(fileId) {
     .then(res => res.json())
     .then(data => {
         if (!data.error) {
-            fileData.rects = mergeRectsPreserveFlip(fileData.rects, data.rects);
+            if (data.image_rotated && data.thumbnail) {
+                fileData.thumbnail = data.thumbnail;
+                fileData._cachedImg = null;
+                fileData.rects = data.rects;
+                const fileThumbImg = document.getElementById(`thumb-${fileId}`);
+                if (fileThumbImg) fileThumbImg.src = data.thumbnail;
+                showToast(`[${fileData.name}] 超过半数切片倒置，已自动翻转大图`, 3500);
+            } else {
+                fileData.rects = mergeRectsPreserveFlip(fileData.rects, data.rects);
+            }
             fileData.debugImgSrc = null;
             fileData.detected = true;
             fileData.selectedCropIndices = new Set(data.rects.length > 0 ? [0] : []);
@@ -2058,6 +2079,13 @@ async function autoOrientAllCrops() {
 
         const data = await res.json();
         if (data.rects) {
+            if (data.image_rotated && data.thumbnail) {
+                fileData.thumbnail = data.thumbnail;
+                fileData._cachedImg = null;
+                const fileThumbImg = document.getElementById(`thumb-${currentFileId}`);
+                if (fileThumbImg) fileThumbImg.src = data.thumbnail;
+                showToast(`[${fileData.name}] 超过半数切片倒置，已自动翻转大图`, 3500);
+            }
             fileData.rects = data.rects;
             updateFileUiAfterRectsChange();
             log(`[${fileData.name}] ${data.message || '朝向智能预判校正完成。'}`);

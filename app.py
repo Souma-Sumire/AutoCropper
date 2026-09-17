@@ -266,6 +266,41 @@ def estimate_threshold():
     best_thresh = ImageCropper.estimate_best_threshold(gray, bg_type)
     return jsonify({"threshold": best_thresh})
 
+def _invert_image_files(session_id, file_id):
+    """将 session 中的 preview.png 和 original.png 旋转 180 度翻转保存，返回新的 preview_img 与 base64 缩略图"""
+    session_path = os.path.join(UPLOAD_DIR, session_id, file_id)
+    preview_path = os.path.join(session_path, "preview.png")
+    original_path = os.path.join(session_path, "original.png")
+
+    preview_img = ImageCropper.imread(preview_path)
+    if preview_img is not None:
+        preview_img = cv2.rotate(preview_img, cv2.ROTATE_180)
+        ImageCropper.imwrite(preview_path, preview_img)
+
+    if os.path.exists(original_path):
+        orig_img = ImageCropper.imread(original_path)
+        if orig_img is not None:
+            orig_img = cv2.rotate(orig_img, cv2.ROTATE_180)
+            ImageCropper.imwrite(original_path, orig_img)
+
+    meta_path = os.path.join(session_path, "meta.json")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            meta["inverted"] = not meta.get("inverted", False)
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False)
+        except Exception:
+            pass
+
+    new_thumb = ""
+    if preview_img is not None:
+        _, buffer = cv2.imencode('.png', preview_img)
+        new_thumb = f"data:image/png;base64,{base64.b64encode(buffer).decode('utf-8')}"
+
+    return preview_img, new_thumb
+
 @app.route('/api/auto_orient', methods=['POST'])
 def auto_orient():
     data = request.get_json() or {}
@@ -285,9 +320,11 @@ def auto_orient():
         return jsonify({"error": "读取预览文件失败"}), 500
 
     changed_count = 0
+    valid_count = 0
     for r in rects:
         if r.get("excluded"):
             continue
+        valid_count += 1
         crop = ImageCropper.extract_crop(
             preview_img, r, scale_x=1.0, scale_y=1.0, auto_rotate=auto_rotate, bg_type=bg_type
         )
@@ -299,11 +336,37 @@ def auto_orient():
                 r["orient"] = new_orient
                 changed_count += 1
 
-    return jsonify({
+    # 规则：如果扫描结果超过半数的切片都需要倒置，则大图应该倒置
+    image_rotated = False
+    new_thumbnail = None
+    inverted_count = sum(1 for r in rects if not r.get("excluded") and int(r.get("orient", 0) or 0) == 180)
+    if valid_count > 0 and inverted_count > valid_count / 2:
+        preview_img, new_thumbnail = _invert_image_files(session_id, file_id)
+        if preview_img is not None:
+            image_rotated = True
+            img_h, img_w = preview_img.shape[:2]
+            rects = ImageCropper.rotate_rects_180(rects, img_w, img_h)
+            for r in rects:
+                if r.get("excluded"):
+                    continue
+                crop = ImageCropper.extract_crop(
+                    preview_img, r, scale_x=1.0, scale_y=1.0, auto_rotate=auto_rotate, bg_type=bg_type
+                )
+                if crop is not None and crop.size > 0:
+                    deg = ImageCropper.predict_orientation(crop)
+                    r["orient"] = deg
+
+    msg = f"检测到超过半数切片倒置（{inverted_count}/{valid_count}），已将大图旋转180°正向放置并校正切片。" if image_rotated else f"已智能校正 {changed_count} 张照片的朝向。"
+    resp = {
         "rects": rects,
         "changed_count": changed_count,
-        "message": f"已智能校正 {changed_count} 张照片的朝向。"
-    })
+        "image_rotated": image_rotated,
+        "message": msg
+    }
+    if image_rotated and new_thumbnail:
+        resp["thumbnail"] = new_thumbnail
+
+    return jsonify(resp)
 
 @app.route('/api/preview', methods=['POST'])
 def preview_crops():
@@ -319,6 +382,7 @@ def preview_crops():
     max_area_pct = float(data.get("max_area_pct", 80.0))
     padding = int(data.get("padding", 2))
     debug_mode = data.get("debug_mode", "original")
+    allow_auto_invert = bool(data.get("allow_auto_invert", True))
     
     session_path = os.path.join(UPLOAD_DIR, session_id, file_id)
     preview_path = os.path.join(session_path, "preview.png")
@@ -347,6 +411,33 @@ def preview_crops():
                 if deg != 0:
                     r["orient"] = deg
 
+    # 规则：如果扫描结果超过半数的切片都需要倒置，则大图应该倒置
+    image_rotated = False
+    new_thumbnail = None
+    valid_rects = [r for r in rects if not r.get("excluded")]
+    inverted_count = sum(1 for r in valid_rects if int(r.get("orient", 0) or 0) == 180)
+
+    if allow_auto_invert and len(valid_rects) > 0 and inverted_count > len(valid_rects) / 2:
+        preview_img, new_thumbnail = _invert_image_files(session_id, file_id)
+        if preview_img is not None:
+            image_rotated = True
+            img_h, img_w = preview_img.shape[:2]
+            rects = ImageCropper.rotate_rects_180(rects, img_w, img_h)
+            for r in rects:
+                if r.get("excluded"):
+                    continue
+                crop = ImageCropper.extract_crop(
+                    preview_img, r, scale_x=1.0, scale_y=1.0, auto_rotate=auto_rotate, bg_type=bg_type
+                )
+                if crop is not None and crop.size > 0:
+                    deg = ImageCropper.predict_orientation(crop)
+                    r["orient"] = deg
+            # 翻转后若在调试模式下，重新计算二值化图
+            gray = cv2.cvtColor(preview_img, cv2.COLOR_BGR2GRAY)
+            blurred, thresh = ImageCropper.process_preview(
+                gray, blur_kernel, threshold_val, bg_type, threshold_mode=threshold_mode, morph_size=morph_size
+            )
+
     elapsed_ms = int((time.time() - start_time) * 1000)
     
     debug_image_base64 = ""
@@ -357,13 +448,19 @@ def preview_crops():
         _, buffer = cv2.imencode('.png', blurred)
         debug_image_base64 = f"data:image/png;base64,{base64.b64encode(buffer).decode('utf-8')}"
         
-    log_msg = f"检测到轮廓 {len(rects) + filtered_count} 个。保留 {len(rects)} 个，过滤噪点 {filtered_count} 个。模式: {threshold_mode}，耗时: {elapsed_ms}ms。"
+    invert_notice = f" 检测到超过半数切片倒置（{inverted_count}/{len(valid_rects)}），已将大图旋转180°正向放置。" if image_rotated else ""
+    log_msg = f"检测到轮廓 {len(rects) + filtered_count} 个。保留 {len(rects)} 个，过滤噪点 {filtered_count} 个。模式: {threshold_mode}，耗时: {elapsed_ms}ms。{invert_notice}"
     
-    return jsonify({
+    resp = {
         "rects": rects,
         "debug_image": debug_image_base64,
-        "log": log_msg
-    })
+        "log": log_msg,
+        "image_rotated": image_rotated
+    }
+    if image_rotated and new_thumbnail:
+        resp["thumbnail"] = new_thumbnail
+
+    return jsonify(resp)
 
 def _collect_cropped_items(session_id, files, naming_template=None, ext="jpg"):
     """从会话原图按 rects 提取裁剪结果。返回每个裁剪项的字典信息，包含 source_dir。"""
