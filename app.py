@@ -157,7 +157,12 @@ def _process_and_store_image(session_id, original_img, filename, source_path="",
     _, buffer = cv2.imencode('.png', preview_img)
     thumbnail_base64 = base64.b64encode(buffer).decode('utf-8')
 
-    resolved_source_dir = source_dir or (os.path.dirname(source_path) if source_path else "")
+    resolved_source_dir = ""
+    if source_dir and source_dir.strip():
+        resolved_source_dir = os.path.abspath(source_dir.strip().strip('"').strip("'"))
+    elif source_path and source_path.strip():
+        resolved_source_dir = os.path.abspath(os.path.dirname(source_path.strip().strip('"').strip("'")))
+
     meta = {
         "filename": filename,
         "source_path": source_path,
@@ -480,7 +485,7 @@ def _collect_cropped_items(session_id, files, naming_template=None, ext="jpg"):
         original_path = os.path.join(session_path, "original.png")
         preview_path = os.path.join(session_path, "preview.png")
 
-        # 若前端未传 source_dir，尝试从服务端持久化的 meta.json 读取
+        # 若未获取到 source_dir，尝试从服务端持久化的 meta.json 读取
         if not source_dir:
             meta_path = os.path.join(session_path, "meta.json")
             if os.path.exists(meta_path):
@@ -488,8 +493,13 @@ def _collect_cropped_items(session_id, files, naming_template=None, ext="jpg"):
                     with open(meta_path, "r", encoding="utf-8") as mf:
                         meta = json.load(mf)
                         source_dir = (meta.get("source_dir") or "").strip()
+                        if not source_dir and meta.get("source_path"):
+                            source_dir = os.path.dirname(meta.get("source_path")).strip()
                 except Exception:
                     pass
+
+        if source_dir:
+            source_dir = os.path.abspath(os.path.normpath(source_dir.strip().strip('"').strip("'")))
 
         if not os.path.exists(original_path) or not os.path.exists(preview_path):
             continue
@@ -635,19 +645,21 @@ def export_crops():
             folder = item["folder"]
             name = item["name"]
             img = item["img"]
-            item_source_dir = item.get("source_dir", "").strip()
+            item_source_dir = (item.get("source_dir") or "").strip().strip('"').strip("'")
+            if item_source_dir:
+                item_source_dir = os.path.abspath(os.path.normpath(item_source_dir))
 
             if path_mode == "custom" and custom_path and custom_path.strip():
                 base_dir = os.path.abspath(custom_path.strip().strip('"').strip("'"))
-            elif item_source_dir and os.path.isdir(item_source_dir):
+            elif path_mode == "subfolder" and item_source_dir and os.path.isdir(item_source_dir):
                 # 真实输出到原图所在的同级子目录
                 base_dir = os.path.abspath(os.path.join(item_source_dir, sub))
+            elif custom_path and custom_path.strip() and os.path.isdir(custom_path.strip()):
+                base_dir = os.path.abspath(os.path.join(custom_path.strip().strip('"').strip("'"), sub))
             else:
-                # 无法获取原图目录时的兜底处理
-                if custom_path and custom_path.strip():
-                    base_dir = os.path.abspath(custom_path.strip().strip('"').strip("'"))
-                else:
-                    base_dir = os.path.abspath(os.path.join(OUTPUT_DIR, sub))
+                return jsonify({
+                    "error": "未检测到原图所在的本地文件夹（可能由网页直接拖拽导入）。请在导出配置中选择“指定本机文件夹...”选择保存位置，以避免误存入项目目录。"
+                }), 400
 
             os.makedirs(base_dir, exist_ok=True)
             written_dirs.add(base_dir)

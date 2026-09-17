@@ -710,7 +710,7 @@ window.addEventListener('drop', (e) => {
 }, false);
 
 if (dropZone) {
-    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('click', () => uploadBtn.click());
     dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
         if (isInternalDragging) {
@@ -3109,12 +3109,13 @@ function updateExportDestHint() {
 
         if (sourceDirs.length === 1) {
             exportDestHint.innerText = `保存至: ${sourceDirs[0]}/${sub}`;
+            exportDestHint.style.color = 'var(--text-secondary)';
         } else if (sourceDirs.length > 1) {
             exportDestHint.innerText = `保存至: 各自原图所在目录/${sub}`;
-        } else if (fileIds.length > 0) {
-            exportDestHint.innerText = `保存至: 原图所在目录/${sub} (网页拖拽导入建议“指定本机文件夹”)`;
+            exportDestHint.style.color = 'var(--text-secondary)';
         } else {
-            exportDestHint.innerText = `保存至: 原图所在目录/${sub}`;
+            exportDestHint.innerText = '注意: 网页拖拽添加的图片缺少本地路径，请切换“指定本机文件夹”选择保存目录！';
+            exportDestHint.style.color = '#dc2626';
         }
         if (customPathRow) customPathRow.style.display = 'none';
         else if (customPathInput) customPathInput.style.display = 'none';
@@ -3122,11 +3123,13 @@ function updateExportDestHint() {
     } else if (mode === 'custom') {
         const cPath = (customPathInput && customPathInput.value.trim()) ? customPathInput.value.trim() : '';
         exportDestHint.innerText = cPath ? `保存至: ${cPath}` : '保存至: 请输入保存目录或点击“浏览”选择';
+        exportDestHint.style.color = cPath ? 'var(--text-secondary)' : '#dc2626';
         if (customPathRow) customPathRow.style.display = 'flex';
         else if (customPathInput) customPathInput.style.display = 'block';
         if (subfolderInput) subfolderInput.style.display = 'none';
     } else {
         exportDestHint.innerText = '保存至: 浏览器默认下载目录 (ZIP 压缩包)';
+        exportDestHint.style.color = 'var(--text-secondary)';
         if (customPathRow) customPathRow.style.display = 'none';
         else if (customPathInput) customPathInput.style.display = 'none';
         if (subfolderInput) subfolderInput.style.display = 'none';
@@ -3161,6 +3164,18 @@ if (browseCustomPathBtn) {
 function openExportModal() {
     if (openExportModalBtn && openExportModalBtn.disabled) return;
     if (!exportModal) return;
+
+    const fileIds = Object.keys(filesMap);
+    const sourceDirs = Array.from(new Set(
+        fileIds.map(id => filesMap[id].source_dir).filter(d => d && typeof d === 'string' && d.trim().length > 0)
+    ));
+
+    // 缺少原图本地路径时，自动切换到 custom 模式并展开路径设置
+    if (sourceDirs.length === 0 && exportPathModeSelect && exportPathModeSelect.value === 'subfolder') {
+        exportPathModeSelect.value = 'custom';
+        updateExportPathUi();
+    }
+
     updateExportDestHint();
     updateBatchSummary();
     exportModal.style.display = 'flex';
@@ -3194,9 +3209,30 @@ exportBtn.addEventListener('click', async () => {
     const customPath = (customPathInput && customPathInput.value.trim()) ? customPathInput.value.trim() : '';
     const subfolder = (subfolderInput && subfolderInput.value.trim()) ? subfolderInput.value.trim() : 'output';
 
+    const fileIds = Object.keys(filesMap);
+    const sourceDirs = Array.from(new Set(
+        fileIds.map(id => filesMap[id].source_dir).filter(d => d && typeof d === 'string' && d.trim().length > 0)
+    ));
+
+    if (exportMode === 'subfolder' && sourceDirs.length === 0) {
+        showToast('当前图片无原图本地路径（如网页拖放添加），请指定保存目录');
+        if (exportPathModeSelect) {
+            exportPathModeSelect.value = 'custom';
+            updateExportPathUi();
+        }
+        if (browseCustomPathBtn) {
+            browseCustomPathBtn.click();
+        }
+        return;
+    }
+
     if (exportMode === 'custom' && !customPath) {
         showToast('请指定有效的保存目录');
-        if (customPathInput) customPathInput.focus();
+        if (browseCustomPathBtn) {
+            browseCustomPathBtn.click();
+        } else if (customPathInput) {
+            customPathInput.focus();
+        }
         return;
     }
 

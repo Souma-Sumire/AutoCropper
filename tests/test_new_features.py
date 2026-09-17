@@ -222,7 +222,7 @@ def test_export_custom_path_and_subfolder(client, tmp_path):
     assert os.path.exists(custom_dir)
     assert c_data['count'] == 1
 
-    # 2. 测试子文件夹导出（兜底/默认）
+    # 2. 测试当无原图本地路径时拒绝静默写入项目目录（防误存）
     res_sub = client.post('/api/export', json={
         'session_id': sid,
         'export_type': 'local',
@@ -231,10 +231,8 @@ def test_export_custom_path_and_subfolder(client, tmp_path):
         'format': 'jpg',
         'files': [{'file_id': fid, 'filename': 'test_path.png', 'rects': rects}]
     })
-    assert res_sub.status_code == 200
-    s_data = res_sub.get_json()
-    assert 'test_sub_run' in s_data['local_path']
-    assert os.path.exists(s_data['local_path'])
+    assert res_sub.status_code == 400
+    assert "未检测到原图" in res_sub.get_json()['error']
 
 def test_export_source_dir_subfolder(client, tmp_path):
     """测试原图同级子目录导出：确保切片保存到原图所在真实文件夹，而非项目目录"""
