@@ -76,10 +76,10 @@ def test_format_crop_name():
     )
     assert res == "photo_sample_scan_05.jpg"
 
-    res_date = ImageCropper.format_crop_name(
-        "{date}_P{index:03d}", "test.jpg", 12, date_str="20260913", ext="png"
+    res_p3 = ImageCropper.format_crop_name(
+        "{original}_P{index:03d}", "test.jpg", 12, ext="png"
     )
-    assert res_date == "20260913_P012.png"
+    assert res_p3 == "test_P012.png"
 
 def test_predict_orientation_fallback():
     # 测试全黑/全白或天空/地面模拟图像

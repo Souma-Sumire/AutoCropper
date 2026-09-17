@@ -60,17 +60,20 @@ function log(message) {
 }
 
 function setExportBusy(busy, label) {
-    exportBtn.disabled = busy || isImporting || Object.keys(filesMap).length === 0;
-    exportBtn.textContent = busy ? (label || '正在导出…') : '开始执行图像裁剪';
-    if (exportTypeSelect) exportTypeSelect.disabled = busy || isImporting;
-    if (exportRadioCustom) exportRadioCustom.disabled = busy || isImporting;
-    if (exportRadioSubfolder) exportRadioSubfolder.disabled = busy || isImporting;
-    if (exportRadioZip) exportRadioZip.disabled = busy || isImporting;
-    if (customPathInput && !exportRadioCustom?.checked) customPathInput.disabled = true;
-    if (subfolderInput && !exportRadioSubfolder?.checked) subfolderInput.disabled = true;
-    if (exportFormatSelect) exportFormatSelect.disabled = busy || isImporting;
-    if (namingTemplateInput) namingTemplateInput.disabled = busy || isImporting;
-    if (flatExportCheck) flatExportCheck.disabled = busy || isImporting;
+    const isLocked = busy || isImporting;
+    exportBtn.disabled = isLocked || Object.keys(filesMap).length === 0;
+    if (busy) {
+        exportBtn.textContent = label || '正在导出…';
+    } else {
+        updateBatchSummary();
+    }
+    if (exportPathModeSelect) exportPathModeSelect.disabled = isLocked;
+    if (customPathInput) customPathInput.disabled = isLocked;
+    if (browseCustomPathBtn) browseCustomPathBtn.disabled = isLocked;
+    if (subfolderInput) subfolderInput.disabled = isLocked;
+    if (exportFormatSelect) exportFormatSelect.disabled = isLocked;
+    if (namingTemplateInput) namingTemplateInput.disabled = isLocked;
+    if (flatExportCheck) flatExportCheck.disabled = isLocked;
 }
 
 let toastTimer = null;
@@ -161,6 +164,8 @@ function saveWorkspaceState(isManual = false) {
             return {
                 fileId: fid,
                 name: f.name,
+                source_path: f.source_path || '',
+                source_dir: f.source_dir || '',
                 width: f.width,
                 height: f.height,
                 params: f.params,
@@ -238,6 +243,8 @@ async function restoreWorkspaceState() {
             const fid = f.fileId;
             filesMap[fid] = {
                 name: f.name,
+                source_path: f.source_path || '',
+                source_dir: f.source_dir || '',
                 width: f.width,
                 height: f.height,
                 thumbnail: `/api/get_file_preview?session_id=${sessionId}&file_id=${fid}`,
@@ -271,6 +278,7 @@ async function restoreWorkspaceState() {
 
         renderFileList();
         updateBatchSummary();
+        updateExportDestHint();
 
         if (currentFileId) {
             selectFile(currentFileId, true);
@@ -3226,10 +3234,7 @@ exportBtn.addEventListener('click', async () => {
     }
 });
 
-// 导出单选框与偏好项事件绑定
-[exportRadioCustom, exportRadioSubfolder, exportRadioZip].forEach(radio => {
-    if (radio) radio.addEventListener('change', updateExportPathRadioUi);
-});
+
 if (customPathInput) customPathInput.addEventListener('input', savePathPreferences);
 if (subfolderInput) subfolderInput.addEventListener('input', savePathPreferences);
 if (exportFormatSelect) exportFormatSelect.addEventListener('change', savePathPreferences);

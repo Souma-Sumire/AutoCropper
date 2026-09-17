@@ -93,3 +93,24 @@ def test_detect_rects_filters_extreme_aspect_ratio():
     assert len(rects) == 0
     assert filtered == 1
 
+def test_imread_unicode_path(tmp_path):
+    img = np.full((16, 16, 3), 128, dtype=np.uint8)
+    img_path = tmp_path / "中文测试目录_2026" / "测试图片.jpg"
+    assert ImageCropper.imwrite(str(img_path), img)
+    
+    loaded = ImageCropper.imread(str(img_path))
+    assert loaded is not None
+    assert loaded.shape == (16, 16, 3)
+
+    # 不存在的文件返回 None 而非抛错
+    assert ImageCropper.imread(str(tmp_path / "not_exist.jpg")) is None
+
+def test_format_crop_name():
+    name = ImageCropper.format_crop_name("{original}_{index:02d}", "scan01.png", 3)
+    assert name == "scan01_03.jpg"
+
+    name3 = ImageCropper.format_crop_name("{original}_{index:03d}", "photo.png", 7, ext="png")
+    assert name3 == "photo_007.png"
+
+
+

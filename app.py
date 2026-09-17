@@ -258,7 +258,7 @@ def estimate_threshold():
     if not os.path.exists(preview_path):
         return jsonify({"error": "找不到预览文件"}), 404
 
-    preview_img = cv2.imread(preview_path)
+    preview_img = ImageCropper.imread(preview_path)
     if preview_img is None:
         return jsonify({"error": "读取预览文件失败"}), 500
 
@@ -280,7 +280,7 @@ def auto_orient():
     if not os.path.exists(preview_path):
         return jsonify({"error": "找不到预览文件"}), 404
 
-    preview_img = cv2.imread(preview_path)
+    preview_img = ImageCropper.imread(preview_path)
     if preview_img is None:
         return jsonify({"error": "读取预览文件失败"}), 500
 
@@ -325,7 +325,7 @@ def preview_crops():
     if not os.path.exists(preview_path):
         return jsonify({"error": "找不到预览文件，会话可能失效"}), 404
         
-    preview_img = cv2.imread(preview_path)
+    preview_img = ImageCropper.imread(preview_path)
     gray = cv2.cvtColor(preview_img, cv2.COLOR_BGR2GRAY)
     
     auto_rotate = bool(data.get("auto_rotate", True))
@@ -397,8 +397,8 @@ def _collect_cropped_items(session_id, files, naming_template=None, ext="jpg"):
         if not os.path.exists(original_path) or not os.path.exists(preview_path):
             continue
 
-        original_img = cv2.imread(original_path)
-        preview_img = cv2.imread(preview_path)
+        original_img = ImageCropper.imread(original_path)
+        preview_img = ImageCropper.imread(preview_path)
         if original_img is None or preview_img is None:
             continue
 

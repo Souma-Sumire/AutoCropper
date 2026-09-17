@@ -436,7 +436,7 @@ class ImageCropper:
         return cropped
 
     @staticmethod
-    def format_crop_name(template, original_name, index, date_str=None, ext="jpg"):
+    def format_crop_name(template, original_name, index, ext="jpg"):
         """
         根据模板生成文件名。
         支持占位符:
@@ -451,8 +451,6 @@ class ImageCropper:
         stem, _ = os.path.splitext(original_name)
 
         name = template.replace("{original}", stem)
-        if date_str:
-            name = name.replace("{date}", date_str)
         name = name.replace("{index:02d}", f"{index:02d}")
         name = name.replace("{index:03d}", f"{index:03d}")
         name = name.replace("{index}", str(index))
@@ -462,6 +460,21 @@ class ImageCropper:
 
         ext_clean = ext.lower().lstrip(".")
         return f"{name}.{ext_clean}"
+
+    @staticmethod
+    def imread(path, flags=cv2.IMREAD_COLOR):
+        """读取图片；兼容 Windows 中文与特殊字符路径。"""
+        if not path or not os.path.isfile(path):
+            return None
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+            if not data:
+                return None
+            nparr = np.frombuffer(data, np.uint8)
+            return cv2.imdecode(nparr, flags)
+        except Exception:
+            return None
 
     @staticmethod
     def imwrite(path, img, quality=100):
