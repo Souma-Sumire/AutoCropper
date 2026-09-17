@@ -28,54 +28,9 @@
                 <div id="fileListContainer" class="file-list-box"></div>
             </div>
 
-            <!-- 导出设置：经典高密度平铺表单，零嵌套卡片 -->
+            <!-- 导出操作：极简普通按钮，避免占据左侧首屏信息量 -->
             <div class="panel-section export-section">
-                <div class="section-header">
-                    <span>导出切片</span>
-                </div>
-
-                <div class="ctrl-group">
-                    <div class="ctrl-label-row"><span>保存位置</span></div>
-                    <select id="exportPathModeSelect" class="select-input">
-                        <option value="subfolder" selected>原图同级子目录 (output/)</option>
-                        <option value="custom">指定电脑绝对路径...</option>
-                        <option value="zip">打包下载压缩包 (.zip)</option>
-                    </select>
-                    <div id="customPathRow" style="display: none; gap: 4px; margin-top: 4px;">
-                        <input type="text" id="customPathInput" class="text-input" placeholder="输入绝对路径，如: D:\Pictures\Output" style="flex: 1;">
-                        <button id="browseCustomPathBtn" class="btn-secondary" style="padding: 0 8px; white-space: nowrap; height: 26px; font-size: 12px;" type="button">浏览...</button>
-                    </div>
-                    <input type="text" id="subfolderInput" class="text-input" value="output" placeholder="子文件夹名称，默认 output" style="margin-top: 4px;">
-                    <input type="hidden" id="exportType" value="local">
-                </div>
-
-                <div class="ctrl-group">
-                    <div class="ctrl-label-row"><span>图片格式</span></div>
-                    <select id="exportFormat" class="select-input">
-                        <option value="jpg" selected>JPG (高质量 / 体积小 / 快速)</option>
-                        <option value="png">PNG (无损原画 / 体积较大)</option>
-                    </select>
-                </div>
-
-                <div class="ctrl-group">
-                    <div class="ctrl-label-row">
-                        <span>命名模板</span>
-                        <span class="help-tooltip" title="通配符: {original} 原文件名, {index:02d} 两位编号">?</span>
-                    </div>
-                    <input type="text" id="namingTemplate" value="{original}_{index:02d}" class="text-input">
-                </div>
-
-                <div class="ctrl-group">
-                    <label class="checkbox-row">
-                        <input type="checkbox" id="flatExport">
-                        <span>平铺导出（不建子文件夹）</span>
-                    </label>
-                </div>
-
-                <div class="export-action-block">
-                    <button id="exportBtn" class="btn-primary" style="height: 32px;" disabled>保存全部切片 (共 0 张)</button>
-                    <div class="export-dest-hint" id="exportDestHint">目标: 原图目录/output</div>
-                </div>
+                <button id="openExportModalBtn" class="btn-primary" style="height: 32px; width: 100%;" disabled>导出切片 (待添加图片)</button>
             </div>
         </aside>
 
@@ -138,6 +93,63 @@
 
     <!-- 状态保存与操作反馈 Toast -->
     <div id="statusToast" class="status-toast" style="display: none;"></div>
+
+    <!-- 导出设置弹窗：点击左侧“导出切片”后弹出，减少首屏信息量 -->
+    <div id="exportModal" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span class="modal-title">导出切片</span>
+                <button id="closeExportModalBtn" class="modal-close-btn" type="button" title="关闭 (Esc)">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="ctrl-group">
+                    <div class="ctrl-label-row"><span>保存位置</span></div>
+                    <select id="exportPathModeSelect" class="select-input">
+                        <option value="subfolder" selected>原图同级子文件夹</option>
+                        <option value="custom">指定本机文件夹...</option>
+                        <option value="zip">打包为 ZIP 下载</option>
+                    </select>
+                    <div id="customPathRow" style="display: none; gap: 6px; margin-top: 6px;">
+                        <input type="text" id="customPathInput" class="text-input" placeholder="输入绝对路径，例如: D:\Photos\Output" style="flex: 1;">
+                        <button id="browseCustomPathBtn" class="btn-secondary" style="padding: 0 12px; white-space: nowrap; height: 28px; font-size: 12px; flex-shrink: 0;" type="button">浏览...</button>
+                    </div>
+                    <input type="text" id="subfolderInput" class="text-input" value="output" placeholder="子文件夹名称，例如: output" style="margin-top: 6px;">
+                    <input type="hidden" id="exportType" value="local">
+                    <div class="export-dest-hint" id="exportDestHint" style="margin-top: 6px;">保存位置: 原图目录/output</div>
+                </div>
+
+                <div class="ctrl-group">
+                    <div class="ctrl-label-row"><span>图片格式</span></div>
+                    <select id="exportFormat" class="select-input">
+                        <option value="jpg" selected>JPG (高质量 / 推荐)</option>
+                        <option value="png">PNG (无损画质 / 体积较大)</option>
+                    </select>
+                </div>
+
+                <div class="ctrl-group">
+                    <div class="ctrl-label-row">
+                        <span>命名格式</span>
+                        <span class="help-tooltip" title="通配符: {original} 原文件名, {index:02d} 两位编号 (01, 02...), {index} 序号">?</span>
+                    </div>
+                    <input type="text" id="namingTemplate" value="{original}_{index:02d}" class="text-input">
+                </div>
+
+                <div class="ctrl-group" style="margin-bottom: 0;">
+                    <label class="checkbox-row">
+                        <input type="checkbox" id="flatExport">
+                        <span>平铺输出（所有切片直接保存，不按原图分目录）</span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <span id="modalSummaryHint" class="modal-summary-hint">共 0 张切片</span>
+                <div class="modal-actions">
+                    <button id="cancelExportModalBtn" class="btn-secondary" type="button">取消</button>
+                    <button id="exportBtn" class="btn-primary" type="button">确认导出</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script src="/static/js/app.js?v=2.0"></script>
 </body>

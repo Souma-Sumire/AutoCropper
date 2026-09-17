@@ -14,10 +14,13 @@ const batchSummary = document.getElementById('batchSummary');
 const fileListContainer = document.getElementById('fileListContainer');
 const stateSaveIndicator = document.getElementById('stateSaveIndicator');
 
-// 导出保存位置相关 DOM
-const exportRadioCustom = document.getElementById('exportRadioCustom');
-const exportRadioSubfolder = document.getElementById('exportRadioSubfolder');
-const exportRadioZip = document.getElementById('exportRadioZip');
+// 导出与弹窗相关 DOM
+const openExportModalBtn = document.getElementById('openExportModalBtn');
+const exportModal = document.getElementById('exportModal');
+const closeExportModalBtn = document.getElementById('closeExportModalBtn');
+const cancelExportModalBtn = document.getElementById('cancelExportModalBtn');
+const modalSummaryHint = document.getElementById('modalSummaryHint');
+
 const customPathRow = document.getElementById('customPathRow');
 const customPathInput = document.getElementById('customPathInput');
 const browseCustomPathBtn = document.getElementById('browseCustomPathBtn');
@@ -61,10 +64,15 @@ function log(message) {
 
 function setExportBusy(busy, label) {
     const isLocked = busy || isImporting;
-    exportBtn.disabled = isLocked || Object.keys(filesMap).length === 0;
-    if (busy) {
-        exportBtn.textContent = label || '正在导出…';
-    } else {
+    if (exportBtn) {
+        exportBtn.disabled = isLocked || Object.keys(filesMap).length === 0;
+        if (busy) exportBtn.textContent = label || '正在导出…';
+    }
+    if (openExportModalBtn) {
+        openExportModalBtn.disabled = isLocked || Object.keys(filesMap).length === 0;
+        if (busy) openExportModalBtn.textContent = label || '正在导出…';
+    }
+    if (!busy) {
         updateBatchSummary();
     }
     if (exportPathModeSelect) exportPathModeSelect.disabled = isLocked;
@@ -458,18 +466,24 @@ function updateBatchSummary() {
         const validRects = (filesMap[id].rects || []).filter(r => !r.excluded);
         totalCrops += validRects.length;
     });
+    const summaryText = `共 ${totalFiles} 个文件 · ${totalCrops} 张切片`;
     if (batchSummary) {
-        batchSummary.innerText = `${totalFiles} 个文件 · 共 ${totalCrops} 张子图`;
+        batchSummary.innerText = summaryText;
+    }
+    if (modalSummaryHint) {
+        modalSummaryHint.innerText = summaryText;
     }
 
+    const hasCrops = totalCrops > 0;
+    const openBtnText = hasCrops ? `导出切片 (${totalCrops})` : (totalFiles > 0 ? '正在识别图片...' : '导出切片 (待添加图片)');
+
+    if (openExportModalBtn) {
+        openExportModalBtn.disabled = !hasCrops || isImporting;
+        openExportModalBtn.innerText = openBtnText;
+    }
     if (exportBtn) {
-        if (totalCrops > 0) {
-            exportBtn.disabled = false;
-            exportBtn.innerText = `保存全部切片到本地 (共 ${totalCrops} 张)`;
-        } else {
-            exportBtn.disabled = true;
-            exportBtn.innerText = totalFiles > 0 ? '等待图片识别中...' : '保存切片到本地 (请先添加图片)';
-        }
+        exportBtn.disabled = !hasCrops || isImporting;
+        exportBtn.innerText = hasCrops ? `确认导出 (${totalCrops})` : '确认导出';
     }
 }
 
@@ -3030,25 +3044,25 @@ function updateExportDestHint() {
         ));
 
         if (sourceDirs.length === 1) {
-            exportDestHint.innerText = `目标: ${sourceDirs[0]}/${sub}`;
+            exportDestHint.innerText = `保存至: ${sourceDirs[0]}/${sub}`;
         } else if (sourceDirs.length > 1) {
-            exportDestHint.innerText = `目标: 各自原图目录/${sub}`;
+            exportDestHint.innerText = `保存至: 各自原图所在目录/${sub}`;
         } else if (fileIds.length > 0) {
-            exportDestHint.innerText = `目标: 原图目录/${sub} (拖拽图片建议指定路径)`;
+            exportDestHint.innerText = `保存至: 原图所在目录/${sub} (网页拖拽导入建议“指定本机文件夹”)`;
         } else {
-            exportDestHint.innerText = `目标: 原图目录/${sub}`;
+            exportDestHint.innerText = `保存至: 原图所在目录/${sub}`;
         }
         if (customPathRow) customPathRow.style.display = 'none';
         else if (customPathInput) customPathInput.style.display = 'none';
         if (subfolderInput) subfolderInput.style.display = 'block';
     } else if (mode === 'custom') {
         const cPath = (customPathInput && customPathInput.value.trim()) ? customPathInput.value.trim() : '';
-        exportDestHint.innerText = cPath ? `目标: ${cPath}` : '目标: 请点击右侧“浏览”或输入目标绝对路径';
+        exportDestHint.innerText = cPath ? `保存至: ${cPath}` : '保存至: 请输入保存目录或点击“浏览”选择';
         if (customPathRow) customPathRow.style.display = 'flex';
         else if (customPathInput) customPathInput.style.display = 'block';
         if (subfolderInput) subfolderInput.style.display = 'none';
     } else {
-        exportDestHint.innerText = '目标: 浏览器下载 ZIP 压缩包';
+        exportDestHint.innerText = '保存至: 浏览器默认下载目录 (ZIP 压缩包)';
         if (customPathRow) customPathRow.style.display = 'none';
         else if (customPathInput) customPathInput.style.display = 'none';
         if (subfolderInput) subfolderInput.style.display = 'none';
@@ -3080,6 +3094,33 @@ if (browseCustomPathBtn) {
         } catch (_) {}
     });
 }
+function openExportModal() {
+    if (openExportModalBtn && openExportModalBtn.disabled) return;
+    if (!exportModal) return;
+    updateExportDestHint();
+    updateBatchSummary();
+    exportModal.style.display = 'flex';
+}
+
+function closeExportModal() {
+    if (!exportModal) return;
+    exportModal.style.display = 'none';
+}
+
+if (openExportModalBtn) openExportModalBtn.addEventListener('click', openExportModal);
+if (closeExportModalBtn) closeExportModalBtn.addEventListener('click', closeExportModal);
+if (cancelExportModalBtn) cancelExportModalBtn.addEventListener('click', closeExportModal);
+if (exportModal) {
+    exportModal.addEventListener('click', (e) => {
+        if (e.target === exportModal) closeExportModal();
+    });
+}
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && exportModal && exportModal.style.display !== 'none') {
+        closeExportModal();
+    }
+});
+
 updateExportDestHint();
 
 exportBtn.addEventListener('click', async () => {
@@ -3090,7 +3131,7 @@ exportBtn.addEventListener('click', async () => {
     const subfolder = (subfolderInput && subfolderInput.value.trim()) ? subfolderInput.value.trim() : 'output';
 
     if (exportMode === 'custom' && !customPath) {
-        showToast('请输入有效的自定义保存绝对路径或点击“浏览”选择');
+        showToast('请指定有效的保存目录');
         if (customPathInput) customPathInput.focus();
         return;
     }
@@ -3118,7 +3159,7 @@ exportBtn.addEventListener('click', async () => {
         ? 'ZIP 压缩包'
         : (exportMode === 'custom' ? `指定路径 [${customPath}]` : `子文件夹 [${subfolder}]`);
 
-    log(`开始批量裁剪。格式: ${exportFormat.toUpperCase()}，模板: ${namingTemplate}，总文件: ${totalFiles}，子图约 ${totalRects} 张，目标: ${targetDesc}${flat ? ' (平铺)' : ''}`);
+    log(`开始批量裁剪。格式: ${exportFormat.toUpperCase()}，模板: ${namingTemplate}，总文件: ${totalFiles}，切片约 ${totalRects} 张，目标: ${targetDesc}${flat ? ' (平铺)' : ''}`);
     setExportBusy(true, '正在导出…');
 
     try {
@@ -3133,7 +3174,7 @@ exportBtn.addEventListener('click', async () => {
                     log(`[${i + 1}/${totalFiles}] ${fileItem.filename}: 无有效裁剪框，跳过。`);
                     continue;
                 }
-                log(`正在裁剪 [${i + 1}/${totalFiles}]: ${fileItem.filename}（${fileItem.rects.length} 张子图）…`);
+                log(`正在裁剪 [${i + 1}/${totalFiles}]: ${fileItem.filename}（${fileItem.rects.length} 张切片）…`);
 
                 const res = await fetch('/api/export', {
                     method: 'POST',
@@ -3173,12 +3214,13 @@ exportBtn.addEventListener('click', async () => {
             }
 
             setExportBusy(true, '正在打包…');
-            log(`正在浏览器内打包 ${zipEntries.length} 张图片为 ZIP…`);
+            log(`正在打包 ${zipEntries.length} 张图片为 ZIP 压缩包…`);
             const zipBlob = buildStoreZip(zipEntries);
             const zipName = `batch_cropped_${exportFormat}_${Date.now().toString(36)}.zip`;
             downloadBlobNative(zipBlob, zipName);
-            showToast(`已成功打包下载 ${zipEntries.length} 张图片 (ZIP)`);
-            log(`批量导出完成！已通过浏览器下载: ${zipName}（共 ${zipEntries.length} 张，${exportFormat.toUpperCase()} 格式）。`);
+            showToast(`已成功打包下载 ${zipEntries.length} 张切片 (ZIP)`);
+            log(`导出完成！已通过浏览器下载: ${zipName}（共 ${zipEntries.length} 张，${exportFormat.toUpperCase()} 格式）。`);
+            closeExportModal();
         } else {
             let savedCount = 0;
             let lastPath = '';
@@ -3222,9 +3264,10 @@ exportBtn.addEventListener('click', async () => {
             }
 
             const targetMsg = lastPath ? `至 ${lastPath}` : '';
-            showToast(`切片图片已全部保存成功！共写入 ${savedCount} 张${targetMsg ? ' ' + targetMsg : ''}`, 4500);
+            showToast(`切片已全部导出成功！共写入 ${savedCount} 张${targetMsg ? ' ' + targetMsg : ''}`, 4500);
             log(`批量裁剪保存成功！共写入约 ${savedCount} 张 ${exportFormat.toUpperCase()} 照片。`);
             if (lastPath) log(`输出物理目录: ${lastPath}`);
+            closeExportModal();
         }
     } catch (err) {
         showToast(`导出出错: ${err.message || err}`, 3000);
