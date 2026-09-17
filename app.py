@@ -251,6 +251,32 @@ def pick_folder():
         "cancelled": not bool(path)
     })
 
+@app.route('/api/open_folder', methods=['POST'])
+def open_folder():
+    data = request.get_json() or {}
+    folder_path = (data.get("path") or "").strip().strip('"').strip("'")
+    if not folder_path:
+        return jsonify({"success": False, "error": "未提供文件夹路径"}), 400
+
+    abs_path = os.path.abspath(os.path.normpath(folder_path))
+    if not os.path.exists(abs_path):
+        return jsonify({"success": False, "error": f"指定路径不存在: {abs_path}"}), 404
+
+    target_dir = abs_path if os.path.isdir(abs_path) else os.path.dirname(abs_path)
+    try:
+        if sys.platform == 'win32':
+            os.startfile(target_dir)
+        elif sys.platform == 'darwin':
+            import subprocess
+            subprocess.Popen(['open', target_dir])
+        else:
+            import subprocess
+            subprocess.Popen(['xdg-open', target_dir])
+        return jsonify({"success": True, "path": target_dir})
+    except Exception as e:
+        return jsonify({"success": False, "error": f"打开文件夹失败: {str(e)}"}), 500
+
+
 @app.route('/api/estimate_threshold', methods=['POST'])
 def estimate_threshold():
     data = request.get_json() or {}
@@ -639,6 +665,7 @@ def export_crops():
 
     if export_type == "local":
         sub = subfolder.strip().strip('"').strip("'") if (subfolder and subfolder.strip()) else "output"
+        clean_custom = (custom_path or "").strip().strip('"').strip("'")
         written_dirs = set()
 
         for item in all_cropped_items:
@@ -649,16 +676,13 @@ def export_crops():
             if item_source_dir:
                 item_source_dir = os.path.abspath(os.path.normpath(item_source_dir))
 
-            if path_mode == "custom" and custom_path and custom_path.strip():
-                base_dir = os.path.abspath(custom_path.strip().strip('"').strip("'"))
+            if clean_custom:
+                base_dir = os.path.abspath(clean_custom)
             elif path_mode == "subfolder" and item_source_dir and os.path.isdir(item_source_dir):
-                # 真实输出到原图所在的同级子目录
                 base_dir = os.path.abspath(os.path.join(item_source_dir, sub))
-            elif custom_path and custom_path.strip() and os.path.isdir(custom_path.strip()):
-                base_dir = os.path.abspath(os.path.join(custom_path.strip().strip('"').strip("'"), sub))
             else:
                 return jsonify({
-                    "error": "未检测到原图所在的本地文件夹（可能由网页直接拖拽导入）。请在导出配置中选择“指定本机文件夹...”选择保存位置，以避免误存入项目目录。"
+                    "error": "未检测到原图所在的本地文件夹，请在导出中指定保存切片的本机文件夹路径。"
                 }), 400
 
             os.makedirs(base_dir, exist_ok=True)
@@ -729,7 +753,37 @@ if __name__ == '__main__':
 
     threading.Thread(target=start_cleanup_daemon, daemon=True).start()
 
+    import tempfile
+
+    def should_open_browser():
+        if is_frozen:
+            return True
+
+        # Werkzeug 热重载器环境下：
+        # 父进程 (WERKZEUG_RUN_MAIN 为空) 仅作文件监控，不提供服务，跳过
+        # 子进程 (WERKZEUG_RUN_MAIN == 'true') 为实际 Web 服务进程
+        if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+            ppid = os.getppid()
+            flag_dir = os.path.join(tempfile.gettempdir(), "autocropper_runtime")
+            try:
+                os.makedirs(flag_dir, exist_ok=True)
+                flag_file = os.path.join(flag_dir, f"browser_opened_{ppid}.flag")
+                if os.path.exists(flag_file):
+                    print("  [热重载] 代码已重新载入，已保持现有工作台窗口，无需重复打开。")
+                    return False
+                with open(flag_file, 'w', encoding='utf-8') as f:
+                    f.write(str(os.getpid()))
+                return True
+            except Exception:
+                return True
+        elif 'WERKZEUG_RUN_MAIN' in os.environ:
+            return False
+        else:
+            return True
+
     def open_browser(host='127.0.0.1', port=5000, max_wait=6.0):
+        if not should_open_browser():
+            return
         start_time = time.time()
         while time.time() - start_time < max_wait:
             try:

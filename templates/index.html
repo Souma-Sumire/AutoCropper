@@ -29,8 +29,9 @@
             </div>
 
             <!-- 导出操作：极简普通按钮，避免占据左侧首屏信息量 -->
-            <div class="panel-section export-section">
+            <div class="panel-section export-section" style="display: flex; flex-direction: column; gap: 6px;">
                 <button id="openExportModalBtn" class="btn-primary" style="height: 32px; width: 100%;" disabled>导出切片 (待添加图片)</button>
+                <button id="openLastExportDirBtn" class="btn-secondary" style="height: 28px; width: 100%; display: none;" type="button" title="在系统文件资源管理器中打开导出目录">打开导出文件夹 ↗</button>
             </div>
         </aside>
 
@@ -105,18 +106,17 @@
                 <div class="ctrl-group">
                     <div class="ctrl-label-row"><span>保存位置</span></div>
                     <select id="exportPathModeSelect" class="select-input">
-                        <option value="subfolder" selected>原图同级子文件夹</option>
-                        <option value="custom">指定本机文件夹...</option>
-                        <option value="zip">打包为 ZIP 下载</option>
+                        <option value="custom" selected>保存到本机文件夹</option>
+                        <option value="zip">打包为 ZIP 压缩包下载</option>
                     </select>
-                    <div id="customPathRow" style="display: none; gap: 6px; margin-top: 6px;">
-                        <input type="text" id="customPathInput" class="text-input" placeholder="输入绝对路径，例如: D:\Photos\Output" style="flex: 1;">
+                    <div id="customPathRow" style="display: flex; gap: 6px; margin-top: 6px;">
+                        <input type="text" id="customPathInput" class="text-input" placeholder="点击右侧“浏览...”选择或输入绝对路径" style="flex: 1;">
                         <button id="browseCustomPathBtn" class="btn-secondary" style="padding: 0 12px; white-space: nowrap; height: 28px; font-size: 12px; flex-shrink: 0;" type="button">浏览...</button>
                     </div>
-                    <input type="text" id="subfolderInput" class="text-input" value="output" placeholder="子文件夹名称，例如: output" style="margin-top: 6px;">
                     <input type="hidden" id="exportType" value="local">
-                    <div class="export-dest-hint" id="exportDestHint" style="margin-top: 6px;">保存位置: 原图目录/output</div>
+                    <div class="export-dest-hint" id="exportDestHint" style="margin-top: 6px;">保存位置: 未指定路径，请点击“浏览...”选择文件夹</div>
                 </div>
+
 
                 <div class="ctrl-group">
                     <div class="ctrl-label-row"><span>图片格式</span></div>

@@ -16,6 +16,7 @@ const stateSaveIndicator = document.getElementById('stateSaveIndicator');
 
 // 导出与弹窗相关 DOM
 const openExportModalBtn = document.getElementById('openExportModalBtn');
+const openLastExportDirBtn = document.getElementById('openLastExportDirBtn');
 const exportModal = document.getElementById('exportModal');
 const closeExportModalBtn = document.getElementById('closeExportModalBtn');
 const cancelExportModalBtn = document.getElementById('cancelExportModalBtn');
@@ -24,13 +25,16 @@ const modalSummaryHint = document.getElementById('modalSummaryHint');
 const customPathRow = document.getElementById('customPathRow');
 const customPathInput = document.getElementById('customPathInput');
 const browseCustomPathBtn = document.getElementById('browseCustomPathBtn');
-const subfolderInput = document.getElementById('subfolderInput');
+const exportPathModeSelect = document.getElementById('exportPathModeSelect');
 const exportTypeSelect = document.getElementById('exportType');
 const exportFormatSelect = document.getElementById('exportFormat');
 const namingTemplateInput = document.getElementById('namingTemplate');
 const flatExportCheck = document.getElementById('flatExport');
 const exportBtn = document.getElementById('exportBtn');
 const statusToast = document.getElementById('statusToast');
+
+let lastExportDirectory = localStorage.getItem('autocropper_last_export_dir') || '';
+
 
 // DOM 节点 - 中间视口
 const canvasViewport = document.getElementById('canvasViewport');
@@ -75,20 +79,43 @@ function setExportBusy(busy, label) {
     if (!busy) {
         updateBatchSummary();
     }
+    if (openLastExportDirBtn) openLastExportDirBtn.disabled = isLocked;
     if (exportPathModeSelect) exportPathModeSelect.disabled = isLocked;
     if (customPathInput) customPathInput.disabled = isLocked;
     if (browseCustomPathBtn) browseCustomPathBtn.disabled = isLocked;
-    if (subfolderInput) subfolderInput.disabled = isLocked;
     if (exportFormatSelect) exportFormatSelect.disabled = isLocked;
     if (namingTemplateInput) namingTemplateInput.disabled = isLocked;
     if (flatExportCheck) flatExportCheck.disabled = isLocked;
 }
 
 let toastTimer = null;
-function showToast(message, duration = 2000) {
+function showToast(message, duration = 2000, actionText = '', actionCallback = null) {
     if (!statusToast) return;
-    statusToast.innerText = message;
-    statusToast.style.display = 'block';
+    statusToast.innerHTML = '';
+    const textSpan = document.createElement('span');
+    textSpan.innerText = message;
+    statusToast.appendChild(textSpan);
+
+    if (actionText && typeof actionCallback === 'function') {
+        const actionBtn = document.createElement('button');
+        actionBtn.innerText = actionText;
+        actionBtn.style.marginLeft = '10px';
+        actionBtn.style.padding = '2px 8px';
+        actionBtn.style.background = 'rgba(255, 255, 255, 0.2)';
+        actionBtn.style.border = '1px solid rgba(255, 255, 255, 0.4)';
+        actionBtn.style.color = '#fff';
+        actionBtn.style.borderRadius = '4px';
+        actionBtn.style.cursor = 'pointer';
+        actionBtn.style.fontSize = '12px';
+        actionBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            actionCallback();
+        });
+        statusToast.appendChild(actionBtn);
+    }
+
+    statusToast.style.display = 'inline-flex';
+    statusToast.style.alignItems = 'center';
     statusToast.style.opacity = '1';
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => {
@@ -99,62 +126,131 @@ function showToast(message, duration = 2000) {
     }, duration);
 }
 
+async function openExportFolder(folderPath) {
+    const target = (folderPath || lastExportDirectory || '').trim();
+    if (!target) {
+        showToast('暂无已导出的本地文件夹记录');
+        return;
+    }
+    try {
+        const res = await fetch('/api/open_folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: target })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            showToast(`无法打开文件夹: ${data.error || '路径可能不存在'}`);
+        } else {
+            showToast(`已在系统资源管理器中打开: ${data.path}`);
+        }
+    } catch (err) {
+        showToast(`打开文件夹失败: ${err.message || err}`);
+    }
+}
+
+function updateOpenExportDirBtn() {
+    if (!openLastExportDirBtn) return;
+    if (lastExportDirectory && typeof lastExportDirectory === 'string' && lastExportDirectory.trim().length > 0) {
+        openLastExportDirBtn.style.display = 'block';
+        openLastExportDirBtn.title = `在文件资源管理器中打开: ${lastExportDirectory}`;
+    } else {
+        openLastExportDirBtn.style.display = 'none';
+    }
+}
+
+if (openLastExportDirBtn) {
+    openLastExportDirBtn.addEventListener('click', () => {
+        openExportFolder(lastExportDirectory);
+    });
+}
+
 // 工作区状态持久化与路径偏好记忆
 const WORKSPACE_STORAGE_KEY = 'autocropper_saved_state_v2';
 const PATH_PREF_KEY = 'autocropper_path_pref_v1';
 
 function updateExportPathUi() {
-    if (!exportPathModeSelect) return;
-    const mode = exportPathModeSelect.value;
-    if (mode === 'subfolder') {
+    const mode = exportPathModeSelect ? exportPathModeSelect.value : 'custom';
+    if (mode === 'zip') {
         if (customPathRow) customPathRow.style.display = 'none';
-        else if (customPathInput) customPathInput.style.display = 'none';
-        if (subfolderInput) subfolderInput.style.display = 'block';
-    } else if (mode === 'custom') {
-        if (customPathRow) customPathRow.style.display = 'flex';
-        else if (customPathInput) customPathInput.style.display = 'block';
-        if (subfolderInput) subfolderInput.style.display = 'none';
+        if (exportDestHint) {
+            exportDestHint.innerText = '保存位置: 浏览器默认下载目录 (ZIP 压缩包)';
+            exportDestHint.style.color = 'var(--text-secondary)';
+        }
     } else {
-        if (customPathRow) customPathRow.style.display = 'none';
-        else if (customPathInput) customPathInput.style.display = 'none';
-        if (subfolderInput) subfolderInput.style.display = 'none';
+        if (customPathRow) customPathRow.style.display = 'flex';
+        const cPath = (customPathInput && customPathInput.value.trim()) ? customPathInput.value.trim() : '';
+        if (exportDestHint) {
+            if (cPath) {
+                exportDestHint.innerText = `保存位置: ${cPath}`;
+                exportDestHint.style.color = 'var(--text-secondary)';
+            } else {
+                exportDestHint.innerText = '保存位置: 请点击“浏览...”选择保存文件夹，或直接输入路径';
+                exportDestHint.style.color = '#dc2626';
+            }
+        }
     }
-    updateExportDestHint();
     savePathPreferences();
 }
 
 function savePathPreferences() {
     try {
-        const mode = exportPathModeSelect ? exportPathModeSelect.value : 'subfolder';
+        const mode = exportPathModeSelect ? exportPathModeSelect.value : 'custom';
         const pref = {
             mode,
-            customPath: customPathInput ? customPathInput.value : '',
-            subfolder: subfolderInput ? subfolderInput.value : 'output',
+            customPath: customPathInput ? customPathInput.value.trim() : '',
             format: exportFormatSelect ? exportFormatSelect.value : 'jpg',
             naming: namingTemplateInput ? namingTemplateInput.value : '{original}_{index:02d}',
-            flat: !!(flatExportCheck && flatExportCheck.checked)
+            flat: !!(flatExportCheck && flatExportCheck.checked),
+            lastExportDirectory: lastExportDirectory || ''
         };
         localStorage.setItem(PATH_PREF_KEY, JSON.stringify(pref));
+        if (lastExportDirectory) {
+            localStorage.setItem('autocropper_last_export_dir', lastExportDirectory);
+        }
     } catch (_) {}
 }
 
 function loadPathPreferences() {
     try {
         const raw = localStorage.getItem(PATH_PREF_KEY);
-        if (!raw) return;
+        const storedLastDir = localStorage.getItem('autocropper_last_export_dir') || '';
+        if (storedLastDir) {
+            lastExportDirectory = storedLastDir;
+            updateOpenExportDirBtn();
+        }
+
+        if (!raw) {
+            if (lastExportDirectory && customPathInput && !customPathInput.value) {
+                customPathInput.value = lastExportDirectory;
+            }
+            updateExportPathUi();
+            return;
+        }
+
         const pref = JSON.parse(raw);
-        if (pref.customPath && customPathInput) customPathInput.value = pref.customPath;
-        if (pref.subfolder && subfolderInput) subfolderInput.value = pref.subfolder;
+        if (pref.customPath && customPathInput) {
+            customPathInput.value = pref.customPath;
+        } else if (lastExportDirectory && customPathInput && !customPathInput.value) {
+            customPathInput.value = lastExportDirectory;
+        }
+
+        if (pref.lastExportDirectory && !lastExportDirectory) {
+            lastExportDirectory = pref.lastExportDirectory;
+            updateOpenExportDirBtn();
+        }
+
         if (pref.format && exportFormatSelect) exportFormatSelect.value = pref.format;
         if (pref.naming && namingTemplateInput) namingTemplateInput.value = pref.naming;
         if (typeof pref.flat === 'boolean' && flatExportCheck) flatExportCheck.checked = pref.flat;
 
         if (pref.mode && exportPathModeSelect) {
-            exportPathModeSelect.value = pref.mode;
+            exportPathModeSelect.value = (pref.mode === 'zip') ? 'zip' : 'custom';
         }
         updateExportPathUi();
     } catch (_) {}
 }
+
 
 function saveWorkspaceState(isManual = false) {
     if (isImporting) return;
@@ -3093,56 +3189,18 @@ function drawCanvas(targetFileId) {
     }
 }
 
-const exportPathModeSelect = document.getElementById('exportPathModeSelect');
 const exportDestHint = document.getElementById('exportDestHint');
-
-function updateExportDestHint() {
-    if (!exportDestHint) return;
-    const mode = exportPathModeSelect ? exportPathModeSelect.value : 'subfolder';
-
-    if (mode === 'subfolder') {
-        const sub = (subfolderInput && subfolderInput.value.trim()) ? subfolderInput.value.trim() : 'output';
-        const fileIds = Object.keys(filesMap);
-        const sourceDirs = Array.from(new Set(
-            fileIds.map(id => filesMap[id].source_dir).filter(d => d && typeof d === 'string' && d.trim().length > 0)
-        ));
-
-        if (sourceDirs.length === 1) {
-            exportDestHint.innerText = `保存至: ${sourceDirs[0]}/${sub}`;
-            exportDestHint.style.color = 'var(--text-secondary)';
-        } else if (sourceDirs.length > 1) {
-            exportDestHint.innerText = `保存至: 各自原图所在目录/${sub}`;
-            exportDestHint.style.color = 'var(--text-secondary)';
-        } else {
-            exportDestHint.innerText = '注意: 网页拖拽添加的图片缺少本地路径，请切换“指定本机文件夹”选择保存目录！';
-            exportDestHint.style.color = '#dc2626';
-        }
-        if (customPathRow) customPathRow.style.display = 'none';
-        else if (customPathInput) customPathInput.style.display = 'none';
-        if (subfolderInput) subfolderInput.style.display = 'block';
-    } else if (mode === 'custom') {
-        const cPath = (customPathInput && customPathInput.value.trim()) ? customPathInput.value.trim() : '';
-        exportDestHint.innerText = cPath ? `保存至: ${cPath}` : '保存至: 请输入保存目录或点击“浏览”选择';
-        exportDestHint.style.color = cPath ? 'var(--text-secondary)' : '#dc2626';
-        if (customPathRow) customPathRow.style.display = 'flex';
-        else if (customPathInput) customPathInput.style.display = 'block';
-        if (subfolderInput) subfolderInput.style.display = 'none';
-    } else {
-        exportDestHint.innerText = '保存至: 浏览器默认下载目录 (ZIP 压缩包)';
-        exportDestHint.style.color = 'var(--text-secondary)';
-        if (customPathRow) customPathRow.style.display = 'none';
-        else if (customPathInput) customPathInput.style.display = 'none';
-        if (subfolderInput) subfolderInput.style.display = 'none';
-    }
-}
 
 if (exportPathModeSelect) {
     exportPathModeSelect.addEventListener('change', () => {
         updateExportPathUi();
     });
 }
-if (subfolderInput) subfolderInput.addEventListener('input', () => { updateExportDestHint(); savePathPreferences(); });
-if (customPathInput) customPathInput.addEventListener('input', () => { updateExportDestHint(); savePathPreferences(); });
+if (customPathInput) {
+    customPathInput.addEventListener('input', () => {
+        updateExportPathUi();
+    });
+}
 if (browseCustomPathBtn) {
     browseCustomPathBtn.addEventListener('click', async () => {
         try {
@@ -3155,28 +3213,22 @@ if (browseCustomPathBtn) {
             const data = await res.json();
             if (data.folder && customPathInput) {
                 customPathInput.value = data.folder;
-                updateExportDestHint();
-                savePathPreferences();
+                lastExportDirectory = data.folder;
+                updateOpenExportDirBtn();
+                updateExportPathUi();
             }
         } catch (_) {}
     });
 }
+
 function openExportModal() {
     if (openExportModalBtn && openExportModalBtn.disabled) return;
     if (!exportModal) return;
 
-    const fileIds = Object.keys(filesMap);
-    const sourceDirs = Array.from(new Set(
-        fileIds.map(id => filesMap[id].source_dir).filter(d => d && typeof d === 'string' && d.trim().length > 0)
-    ));
-
-    // 缺少原图本地路径时，自动切换到 custom 模式并展开路径设置
-    if (sourceDirs.length === 0 && exportPathModeSelect && exportPathModeSelect.value === 'subfolder') {
-        exportPathModeSelect.value = 'custom';
-        updateExportPathUi();
+    if (customPathInput && !customPathInput.value.trim() && lastExportDirectory) {
+        customPathInput.value = lastExportDirectory;
     }
-
-    updateExportDestHint();
+    updateExportPathUi();
     updateBatchSummary();
     exportModal.style.display = 'flex';
 }
@@ -3200,34 +3252,14 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
-updateExportDestHint();
-
 exportBtn.addEventListener('click', async () => {
     if (!sessionId || Object.keys(filesMap).length === 0) return;
 
-    const exportMode = exportPathModeSelect ? exportPathModeSelect.value : 'subfolder';
+    const exportMode = (exportPathModeSelect && exportPathModeSelect.value === 'zip') ? 'zip' : 'custom';
     const customPath = (customPathInput && customPathInput.value.trim()) ? customPathInput.value.trim() : '';
-    const subfolder = (subfolderInput && subfolderInput.value.trim()) ? subfolderInput.value.trim() : 'output';
-
-    const fileIds = Object.keys(filesMap);
-    const sourceDirs = Array.from(new Set(
-        fileIds.map(id => filesMap[id].source_dir).filter(d => d && typeof d === 'string' && d.trim().length > 0)
-    ));
-
-    if (exportMode === 'subfolder' && sourceDirs.length === 0) {
-        showToast('当前图片无原图本地路径（如网页拖放添加），请指定保存目录');
-        if (exportPathModeSelect) {
-            exportPathModeSelect.value = 'custom';
-            updateExportPathUi();
-        }
-        if (browseCustomPathBtn) {
-            browseCustomPathBtn.click();
-        }
-        return;
-    }
 
     if (exportMode === 'custom' && !customPath) {
-        showToast('请指定有效的保存目录');
+        showToast('请选择切片保存的本地文件夹');
         if (browseCustomPathBtn) {
             browseCustomPathBtn.click();
         } else if (customPathInput) {
@@ -3255,9 +3287,7 @@ exportBtn.addEventListener('click', async () => {
     const totalFiles = filesPayload.length;
     const totalRects = filesPayload.reduce((n, f) => n + f.rects.length, 0);
 
-    const targetDesc = (exportMode === 'zip')
-        ? 'ZIP 压缩包'
-        : (exportMode === 'custom' ? `指定路径 [${customPath}]` : `子文件夹 [${subfolder}]`);
+    const targetDesc = (exportMode === 'zip') ? 'ZIP 压缩包' : `本机路径 [${customPath}]`;
 
     log(`开始批量裁剪。格式: ${exportFormat.toUpperCase()}，模板: ${namingTemplate}，总文件: ${totalFiles}，切片约 ${totalRects} 张，目标: ${targetDesc}${flat ? ' (平铺)' : ''}`);
     setExportBusy(true, '正在导出…');
@@ -3340,9 +3370,8 @@ exportBtn.addEventListener('click', async () => {
                     body: JSON.stringify({
                         session_id: sessionId,
                         export_type: 'local',
-                        path_mode: exportMode,
+                        path_mode: 'custom',
                         custom_path: customPath,
-                        subfolder: subfolder,
                         format: exportFormat,
                         naming_template: namingTemplate,
                         quality: 100,
@@ -3363,8 +3392,16 @@ exportBtn.addEventListener('click', async () => {
                 log(`[${fileItem.filename}] ${data.message || '已写入'}`);
             }
 
+            if (lastPath) {
+                lastExportDirectory = lastPath;
+                localStorage.setItem('autocropper_last_export_dir', lastPath);
+                updateOpenExportDirBtn();
+            }
+
             const targetMsg = lastPath ? `至 ${lastPath}` : '';
-            showToast(`切片已全部导出成功！共写入 ${savedCount} 张${targetMsg ? ' ' + targetMsg : ''}`, 4500);
+            showToast(`切片已全部导出成功！共写入 ${savedCount} 张${targetMsg ? ' ' + targetMsg : ''}`, 5000, '打开文件夹 ↗', () => {
+                openExportFolder(lastExportDirectory);
+            });
             log(`批量裁剪保存成功！共写入约 ${savedCount} 张 ${exportFormat.toUpperCase()} 照片。`);
             if (lastPath) log(`输出物理目录: ${lastPath}`);
             closeExportModal();
@@ -3377,12 +3414,11 @@ exportBtn.addEventListener('click', async () => {
     }
 });
 
-
 if (customPathInput) customPathInput.addEventListener('input', savePathPreferences);
-if (subfolderInput) subfolderInput.addEventListener('input', savePathPreferences);
 if (exportFormatSelect) exportFormatSelect.addEventListener('change', savePathPreferences);
 if (namingTemplateInput) namingTemplateInput.addEventListener('input', savePathPreferences);
 if (flatExportCheck) flatExportCheck.addEventListener('change', savePathPreferences);
+
 
 // 窗口尺寸自适应变动时重新触发画布刷新
 window.addEventListener('resize', () => {

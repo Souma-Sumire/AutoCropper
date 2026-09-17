@@ -1,4 +1,5 @@
 import os
+import sys
 import cv2
 import numpy as np
 import pytest
@@ -408,6 +409,32 @@ def test_preview_inverts_large_image_when_majority_inverted(client, monkeypatch)
     assert prev_data['image_rotated'] is True
     assert 'thumbnail' in prev_data
 
+def test_api_open_folder(client, tmp_path, monkeypatch):
+    """测试 /api/open_folder 接口"""
+    # 1. 缺少路径
+    res_empty = client.post('/api/open_folder', json={})
+    assert res_empty.status_code == 400
+    assert "未提供" in res_empty.get_json()['error']
 
+    # 2. 路径不存在
+    res_not_exist = client.post('/api/open_folder', json={'path': str(tmp_path / 'not_exist_folder')})
+    assert res_not_exist.status_code == 404
+    assert "不存在" in res_not_exist.get_json()['error']
 
+    # 3. 正常存在的路径
+    target_dir = tmp_path / "valid_folder"
+    target_dir.mkdir()
 
+    opened_calls = []
+    if sys.platform == 'win32':
+        monkeypatch.setattr(os, 'startfile', lambda p: opened_calls.append(p))
+    else:
+        import subprocess
+        monkeypatch.setattr(subprocess, 'Popen', lambda args: opened_calls.append(args))
+
+    res_ok = client.post('/api/open_folder', json={'path': str(target_dir)})
+    assert res_ok.status_code == 200
+    ok_data = res_ok.get_json()
+    assert ok_data['success'] is True
+    assert os.path.normpath(ok_data['path']) == os.path.normpath(str(target_dir))
+    assert len(opened_calls) == 1
