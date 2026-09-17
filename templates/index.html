@@ -41,7 +41,10 @@
                         <option value="custom">指定电脑绝对路径...</option>
                         <option value="zip">打包下载压缩包 (.zip)</option>
                     </select>
-                    <input type="text" id="customPathInput" class="text-input" placeholder="输入绝对路径，如: D:\Pictures\Output" style="display: none; margin-top: 4px;">
+                    <div id="customPathRow" style="display: none; gap: 4px; margin-top: 4px;">
+                        <input type="text" id="customPathInput" class="text-input" placeholder="输入绝对路径，如: D:\Pictures\Output" style="flex: 1;">
+                        <button id="browseCustomPathBtn" class="btn-secondary" style="padding: 0 8px; white-space: nowrap; height: 26px; font-size: 12px;" type="button">浏览...</button>
+                    </div>
                     <input type="text" id="subfolderInput" class="text-input" value="output" placeholder="子文件夹名称，默认 output" style="margin-top: 4px;">
                     <input type="hidden" id="exportType" value="local">
                 </div>

@@ -23,12 +23,81 @@ static_dir = get_resource_path('static')
 app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
+import json
 import shutil
 
 UPLOAD_DIR = "temp_uploads"
 OUTPUT_DIR = "output"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+def choose_folder_dialog(title="选择文件夹"):
+    """调出系统文件夹选择对话框，优先使用 tkinter，失败时在 Windows 下回退至 ctypes"""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        folder = filedialog.askdirectory(title=title)
+        root.destroy()
+        if folder:
+            return os.path.abspath(folder)
+        return ""
+    except Exception:
+        pass
+
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            from ctypes import wintypes
+            class BROWSEINFO(ctypes.Structure):
+                _fields_ = [
+                    ('hwndOwner', wintypes.HWND),
+                    ('pidlRoot', wintypes.LPARAM),
+                    ('pszDisplayName', wintypes.LPWSTR),
+                    ('lpszTitle', wintypes.LPCWSTR),
+                    ('ulFlags', wintypes.UINT),
+                    ('lpfn', wintypes.LPVOID),
+                    ('lParam', wintypes.LPARAM),
+                    ('iImage', ctypes.c_int)
+                ]
+            BIF_RETURNONLYFSDIRS = 0x0001
+            BIF_NEWDIALOGSTYLE = 0x0040
+            bi = BROWSEINFO()
+            bi.lpszTitle = title
+            bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE
+            pidl = ctypes.windll.shell32.SHBrowseForFolderW(ctypes.byref(bi))
+            if pidl:
+                path_buf = ctypes.create_unicode_buffer(260)
+                ctypes.windll.shell32.SHGetPathFromIDListW(pidl, path_buf)
+                ctypes.windll.ole32.CoTaskMemFree(pidl)
+                if path_buf.value:
+                    return os.path.abspath(path_buf.value)
+        except Exception:
+            pass
+    return ""
+
+def choose_files_dialog(title="选择要裁剪的本地图片"):
+    """调出系统文件选择对话框，优先使用 tkinter，返回选择的绝对路径列表"""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        filetypes = [
+            ("图片文件", "*.jpg *.jpeg *.png *.bmp *.webp *.tif *.tiff"),
+            ("所有文件", "*.*")
+        ]
+        files = filedialog.askopenfilenames(title=title, filetypes=filetypes)
+        root.destroy()
+        if files:
+            return [os.path.abspath(f) for f in files]
+        return []
+    except Exception:
+        pass
+    return []
 
 def cleanup_temp_uploads(max_age_hours=24):
     """扫描并清理超过指定时长的临时上传会话目录，返回清理的目录数量与释放字节数"""
@@ -44,7 +113,6 @@ def cleanup_temp_uploads(max_age_hours=24):
             if entry.is_dir():
                 try:
                     stat = entry.stat()
-                    # 判断文件夹最近修改时间是否超过指定时长
                     if now - stat.st_mtime >= max_age_sec:
                         dir_size = 0
                         for root, _, files in os.walk(entry.path):
@@ -70,6 +138,46 @@ def index():
 def ping():
     return jsonify({"status": "ok", "message": "服务在线"})
 
+def _process_and_store_image(session_id, original_img, filename, source_path="", source_dir=""):
+    """存储原图、生成预览和缩略图，并记录元数据"""
+    file_id = str(uuid.uuid4())
+    session_path = os.path.join(UPLOAD_DIR, session_id, file_id)
+    os.makedirs(session_path, exist_ok=True)
+
+    file_path = os.path.join(session_path, "original.png")
+    ImageCropper.imwrite(file_path, original_img)
+
+    h, w = original_img.shape[:2]
+    preview_img, scale = ImageCropper.resize_to_limit(original_img, max_height=1600)
+    ImageCropper.imwrite(os.path.join(session_path, "preview.png"), preview_img)
+
+    gray = cv2.cvtColor(preview_img, cv2.COLOR_BGR2GRAY)
+    auto_thresh = ImageCropper.estimate_best_threshold(gray, "light")
+
+    _, buffer = cv2.imencode('.png', preview_img)
+    thumbnail_base64 = base64.b64encode(buffer).decode('utf-8')
+
+    resolved_source_dir = source_dir or (os.path.dirname(source_path) if source_path else "")
+    meta = {
+        "filename": filename,
+        "source_path": source_path,
+        "source_dir": resolved_source_dir
+    }
+    with open(os.path.join(session_path, "meta.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False)
+
+    return {
+        "session_id": session_id,
+        "file_id": file_id,
+        "filename": filename,
+        "source_path": source_path,
+        "source_dir": resolved_source_dir,
+        "width": w,
+        "height": h,
+        "thumbnail": f"data:image/png;base64,{thumbnail_base64}",
+        "suggested_threshold": auto_thresh
+    }
+
 @app.route('/api/upload', methods=['POST'])
 def upload_image():
     if 'file' not in request.files:
@@ -77,41 +185,65 @@ def upload_image():
     file = request.files['file']
     if file.filename == '':
         return jsonify({"error": "未选择文件名"}), 400
-    
+
     session_id = request.form.get("session_id")
     if not session_id:
         session_id = str(uuid.uuid4())
-        
-    file_id = str(uuid.uuid4())
-    session_path = os.path.join(UPLOAD_DIR, session_id, file_id)
-    os.makedirs(session_path, exist_ok=True)
-    
-    file_path = os.path.join(session_path, "original.png")
-    file.save(file_path)
-    
-    original_img = cv2.imread(file_path)
+
+    source_path = request.form.get("source_path", "").strip()
+    source_dir = request.form.get("source_dir", "").strip()
+
+    file_bytes = file.read()
+    nparr = np.frombuffer(file_bytes, np.uint8)
+    original_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if original_img is None:
         return jsonify({"error": "无效的图片格式"}), 400
-        
-    h, w = original_img.shape[:2]
-    preview_img, scale = ImageCropper.resize_to_limit(original_img, max_height=1600)
-    
-    cv2.imwrite(os.path.join(session_path, "preview.png"), preview_img)
-    
-    gray = cv2.cvtColor(preview_img, cv2.COLOR_BGR2GRAY)
-    auto_thresh = ImageCropper.estimate_best_threshold(gray, "light")
 
-    _, buffer = cv2.imencode('.png', preview_img)
-    thumbnail_base64 = base64.b64encode(buffer).decode('utf-8')
-    
+    result = _process_and_store_image(
+        session_id, original_img, file.filename, source_path=source_path, source_dir=source_dir
+    )
+    return jsonify(result)
+
+@app.route('/api/pick_images', methods=['POST'])
+def pick_images():
+    data = request.get_json() or {}
+    session_id = data.get("session_id")
+    if not session_id:
+        session_id = str(uuid.uuid4())
+
+    paths = choose_files_dialog(title="选择要裁剪的本地图片")
+    if not paths:
+        return jsonify({"files": [], "cancelled": True, "session_id": session_id})
+
+    results = []
+    for p in paths:
+        if not os.path.isfile(p):
+            continue
+        img = ImageCropper.imread(p)
+        if img is None:
+            continue
+        filename = os.path.basename(p)
+        source_dir = os.path.dirname(p)
+        item = _process_and_store_image(
+            session_id, img, filename, source_path=p, source_dir=source_dir
+        )
+        results.append(item)
+
     return jsonify({
         "session_id": session_id,
-        "file_id": file_id,
-        "filename": file.filename,
-        "width": w,
-        "height": h,
-        "thumbnail": f"data:image/png;base64,{thumbnail_base64}",
-        "suggested_threshold": auto_thresh
+        "files": results,
+        "count": len(results),
+        "cancelled": False
+    })
+
+@app.route('/api/pick_folder', methods=['POST'])
+def pick_folder():
+    data = request.get_json() or {}
+    title = data.get("title", "选择保存切片的目标文件夹")
+    path = choose_folder_dialog(title=title)
+    return jsonify({
+        "folder": path or "",
+        "cancelled": not bool(path)
     })
 
 @app.route('/api/estimate_threshold', methods=['POST'])
@@ -234,7 +366,7 @@ def preview_crops():
     })
 
 def _collect_cropped_items(session_id, files, naming_template=None, ext="jpg"):
-    """从会话原图按 rects 提取裁剪结果。返回 (folder, name, img) 列表。"""
+    """从会话原图按 rects 提取裁剪结果。返回每个裁剪项的字典信息，包含 source_dir。"""
     all_cropped_items = []
     ext_clean = ext.lower().lstrip(".")
 
@@ -244,11 +376,23 @@ def _collect_cropped_items(session_id, files, naming_template=None, ext="jpg"):
         rects = f.get("rects", [])
         bg_type = f.get("bg_type", "light")
         auto_rotate = f.get("auto_rotate", True)
+        source_dir = (f.get("source_dir") or "").strip()
         name_prefix, _ = os.path.splitext(filename)
 
         session_path = os.path.join(UPLOAD_DIR, session_id, file_id)
         original_path = os.path.join(session_path, "original.png")
         preview_path = os.path.join(session_path, "preview.png")
+
+        # 若前端未传 source_dir，尝试从服务端持久化的 meta.json 读取
+        if not source_dir:
+            meta_path = os.path.join(session_path, "meta.json")
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as mf:
+                        meta = json.load(mf)
+                        source_dir = (meta.get("source_dir") or "").strip()
+                except Exception:
+                    pass
 
         if not os.path.exists(original_path) or not os.path.exists(preview_path):
             continue
@@ -278,7 +422,12 @@ def _collect_cropped_items(session_id, files, naming_template=None, ext="jpg"):
             out_name = ImageCropper.format_crop_name(
                 naming_template, filename, crop_idx, ext=ext_clean
             )
-            all_cropped_items.append((name_prefix, out_name, cropped))
+            all_cropped_items.append({
+                "folder": name_prefix,
+                "name": out_name,
+                "img": cropped,
+                "source_dir": source_dir
+            })
 
     return all_cropped_items
 
@@ -303,11 +452,11 @@ def get_file_preview():
     file_id = request.args.get("file_id")
     if not session_id or not file_id:
         return jsonify({"error": "缺少参数"}), 400
-    
+
     preview_path = os.path.join(UPLOAD_DIR, session_id, file_id, "preview.png")
     if not os.path.exists(preview_path):
         return jsonify({"error": "预览图不存在"}), 404
-        
+
     return send_file(preview_path, mimetype='image/png')
 
 
@@ -345,7 +494,10 @@ def export_crops():
     # 供前端按文件逐步拉取并本地打包
     if export_type == "images":
         images = []
-        for folder, name, img in all_cropped_items:
+        for item in all_cropped_items:
+            folder = item["folder"]
+            name = item["name"]
+            img = item["img"]
             ok, buffer = cv2.imencode(encode_ext, img, encode_params)
             if not ok:
                 continue
@@ -363,7 +515,10 @@ def export_crops():
     if export_type == "zip":
         zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for folder, name, img in all_cropped_items:
+            for item in all_cropped_items:
+                folder = item["folder"]
+                name = item["name"]
+                img = item["img"]
                 ok, buffer = cv2.imencode(encode_ext, img, encode_params)
                 if ok:
                     zf.writestr(_export_entry_path(folder, name, flat=flat), buffer.tobytes())
@@ -376,30 +531,45 @@ def export_crops():
         )
 
     if export_type == "local":
-        if path_mode == "custom" and custom_path and custom_path.strip():
-            raw_path = custom_path.strip().strip('"').strip("'")
-            local_out_dir = os.path.abspath(raw_path)
-        else:
-            sub = subfolder.strip().strip('"').strip("'") if (subfolder and subfolder.strip()) else "output"
-            if sub.lower() in ("output", "./output", ".\\output"):
-                local_out_dir = os.path.abspath(OUTPUT_DIR)
+        sub = subfolder.strip().strip('"').strip("'") if (subfolder and subfolder.strip()) else "output"
+        written_dirs = set()
+
+        for item in all_cropped_items:
+            folder = item["folder"]
+            name = item["name"]
+            img = item["img"]
+            item_source_dir = item.get("source_dir", "").strip()
+
+            if path_mode == "custom" and custom_path and custom_path.strip():
+                base_dir = os.path.abspath(custom_path.strip().strip('"').strip("'"))
+            elif item_source_dir and os.path.isdir(item_source_dir):
+                # 真实输出到原图所在的同级子目录
+                base_dir = os.path.abspath(os.path.join(item_source_dir, sub))
             else:
-                local_out_dir = os.path.abspath(os.path.join(OUTPUT_DIR, sub))
+                # 无法获取原图目录时的兜底处理
+                if custom_path and custom_path.strip():
+                    base_dir = os.path.abspath(custom_path.strip().strip('"').strip("'"))
+                else:
+                    base_dir = os.path.abspath(os.path.join(OUTPUT_DIR, sub))
 
-        os.makedirs(local_out_dir, exist_ok=True)
+            os.makedirs(base_dir, exist_ok=True)
+            written_dirs.add(base_dir)
 
-
-        for folder, name, img in all_cropped_items:
             rel_entry = _export_entry_path(folder, name, flat=flat)
-            out_path = os.path.join(local_out_dir, rel_entry)
+            out_path = os.path.join(base_dir, rel_entry)
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
             if not ImageCropper.imwrite(out_path, img, quality=quality):
                 return jsonify({"error": f"写入失败: {out_path}"}), 500
 
-        abs_out_path = os.path.abspath(local_out_dir)
+        output_paths = sorted(list(written_dirs))
+        display_path = output_paths[0] if len(output_paths) == 1 else (os.path.commonpath(output_paths) if len(output_paths) > 1 else "")
+        if not display_path and output_paths:
+            display_path = output_paths[0]
+
         return jsonify({
             "message": f"成功批量分割并导出 {len(all_cropped_items)} 张照片（{export_format.upper()} 格式）。",
-            "local_path": abs_out_path,
+            "local_path": display_path,
+            "local_paths": output_paths,
             "count": len(all_cropped_items),
         })
 

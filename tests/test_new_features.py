@@ -222,7 +222,7 @@ def test_export_custom_path_and_subfolder(client, tmp_path):
     assert os.path.exists(custom_dir)
     assert c_data['count'] == 1
 
-    # 2. 测试子文件夹导出
+    # 2. 测试子文件夹导出（兜底/默认）
     res_sub = client.post('/api/export', json={
         'session_id': sid,
         'export_type': 'local',
@@ -235,4 +235,70 @@ def test_export_custom_path_and_subfolder(client, tmp_path):
     s_data = res_sub.get_json()
     assert 'test_sub_run' in s_data['local_path']
     assert os.path.exists(s_data['local_path'])
+
+def test_export_source_dir_subfolder(client, tmp_path):
+    """测试原图同级子目录导出：确保切片保存到原图所在真实文件夹，而非项目目录"""
+    # 模拟用户电脑上的原图文件夹
+    source_folder = tmp_path / "user_scans_folder"
+    source_folder.mkdir()
+    fake_orig_img_path = source_folder / "scan_sample.png"
+
+    img = np.full((150, 150, 3), 255, dtype=np.uint8)
+    img[20:70, 20:70] = 0
+    ok = ImageCropper.imwrite(str(fake_orig_img_path), img)
+    assert ok
+
+    # 通过 upload 上传并携带 source_path 与 source_dir
+    with open(fake_orig_img_path, "rb") as f:
+        upload_res = client.post(
+            '/api/upload',
+            data={
+                'file': (f, 'scan_sample.png'),
+                'source_path': str(fake_orig_img_path),
+                'source_dir': str(source_folder)
+            },
+            content_type='multipart/form-data'
+        )
+    assert upload_res.status_code == 200
+    up_data = upload_res.get_json()
+    sid = up_data['session_id']
+    fid = up_data['file_id']
+    assert up_data['source_dir'] == str(source_folder)
+
+    rects = [{"x": 20, "y": 20, "w": 50, "h": 50, "orient": 0, "excluded": False}]
+
+    # 执行 subfolder 模式导出
+    export_res = client.post('/api/export', json={
+        'session_id': sid,
+        'export_type': 'local',
+        'path_mode': 'subfolder',
+        'subfolder': 'output',
+        'format': 'jpg',
+        'files': [{'file_id': fid, 'filename': 'scan_sample.png', 'rects': rects, 'source_dir': str(source_folder)}]
+    })
+    assert export_res.status_code == 200
+    exp_data = export_res.get_json()
+
+    # 核心校验：导出的目标目录必须是原图目录下的 output，而不是项目目录
+    expected_output_dir = str(source_folder / "output")
+    assert os.path.abspath(exp_data['local_path']) == os.path.abspath(expected_output_dir)
+    assert os.path.exists(expected_output_dir)
+
+    exported_files = os.listdir(expected_output_dir)
+    assert len(exported_files) > 0
+
+def test_dialog_apis(client, monkeypatch):
+    """测试原生选择对话框接口"""
+    # 模拟选择图片取消
+    monkeypatch.setattr('app.choose_files_dialog', lambda title: [])
+    pick_res = client.post('/api/pick_images', json={'session_id': 'test_sid'})
+    assert pick_res.status_code == 200
+    assert pick_res.get_json()['cancelled'] is True
+
+    # 模拟选择文件夹
+    monkeypatch.setattr('app.choose_folder_dialog', lambda title: 'D:\\TestFolder')
+    folder_res = client.post('/api/pick_folder', json={'title': '测试'})
+    assert folder_res.status_code == 200
+    assert folder_res.get_json()['folder'] == 'D:\\TestFolder'
+
 

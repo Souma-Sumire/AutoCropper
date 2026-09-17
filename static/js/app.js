@@ -18,7 +18,9 @@ const stateSaveIndicator = document.getElementById('stateSaveIndicator');
 const exportRadioCustom = document.getElementById('exportRadioCustom');
 const exportRadioSubfolder = document.getElementById('exportRadioSubfolder');
 const exportRadioZip = document.getElementById('exportRadioZip');
+const customPathRow = document.getElementById('customPathRow');
 const customPathInput = document.getElementById('customPathInput');
+const browseCustomPathBtn = document.getElementById('browseCustomPathBtn');
 const subfolderInput = document.getElementById('subfolderInput');
 const exportTypeSelect = document.getElementById('exportType');
 const exportFormatSelect = document.getElementById('exportFormat');
@@ -94,13 +96,16 @@ function updateExportPathUi() {
     if (!exportPathModeSelect) return;
     const mode = exportPathModeSelect.value;
     if (mode === 'subfolder') {
-        if (customPathInput) customPathInput.style.display = 'none';
+        if (customPathRow) customPathRow.style.display = 'none';
+        else if (customPathInput) customPathInput.style.display = 'none';
         if (subfolderInput) subfolderInput.style.display = 'block';
     } else if (mode === 'custom') {
-        if (customPathInput) customPathInput.style.display = 'block';
+        if (customPathRow) customPathRow.style.display = 'flex';
+        else if (customPathInput) customPathInput.style.display = 'block';
         if (subfolderInput) subfolderInput.style.display = 'none';
     } else {
-        if (customPathInput) customPathInput.style.display = 'none';
+        if (customPathRow) customPathRow.style.display = 'none';
+        else if (customPathInput) customPathInput.style.display = 'none';
         if (subfolderInput) subfolderInput.style.display = 'none';
     }
     updateExportDestHint();
@@ -511,8 +516,75 @@ if (clearLogBtn) {
     });
 }
 
-// 上传与拖拽
-uploadBtn.addEventListener('click', () => fileInput.click());
+uploadBtn.addEventListener('click', async () => {
+    if (isImporting) return;
+    try {
+        const res = await fetch('/api/pick_images', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId || '' })
+        });
+        if (res.ok) {
+            const data = await res.json();
+            if (data.cancelled) return;
+            if (data.files && data.files.length > 0) {
+                if (!sessionId && data.session_id) sessionId = data.session_id;
+                const firstId = data.files[0].file_id;
+                for (const item of data.files) {
+                    const autoThresh = (typeof item.suggested_threshold === 'number' && item.suggested_threshold > 0)
+                        ? item.suggested_threshold
+                        : 180;
+                    filesMap[item.file_id] = {
+                        name: item.filename,
+                        source_path: item.source_path || '',
+                        source_dir: item.source_dir || '',
+                        width: item.width,
+                        height: item.height,
+                        thumbnail: item.thumbnail,
+                        rects: [],
+                        undoStack: [],
+                        redoStack: [],
+                        detected: false,
+                        selectedCropIndex: 0,
+                        selectedCropIndices: new Set([0]),
+                        params: {
+                            blur_kernel: 3,
+                            threshold: autoThresh,
+                            threshold_mode: 'fixed',
+                            morph_size: 0,
+                            bg_type: 'light',
+                            min_area_pct: 0.25,
+                            max_area_pct: 80.0,
+                            padding: 5,
+                            auto_rotate: true
+                        },
+                        debugImgSrc: null,
+                        _cachedImg: null,
+                        _edgeCanvas: null,
+                        _edgeCtx: null
+                    };
+                }
+                renderFileList();
+                updateBatchSummary();
+                updateExportDestHint();
+                if (!currentFileId && firstId) {
+                    loadFile(firstId);
+                }
+                (async () => {
+                    for (const item of data.files) {
+                        await silentRequestPreview(item.file_id);
+                    }
+                    renderFileList();
+                    updateBatchSummary();
+                })();
+                showToast(`已成功添加 ${data.files.length} 张本地图片`);
+                log(`已成功添加 ${data.files.length} 张图片，原图目录: ${data.files[0].source_dir || '本地'}`);
+                return;
+            }
+        }
+    } catch (_) {}
+    fileInput.click();
+});
 fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
 
 if (clearAllBtn) {
@@ -643,6 +715,8 @@ async function handleFiles(files) {
 
                 filesMap[fileId] = {
                     name: data.filename,
+                    source_path: data.source_path || '',
+                    source_dir: data.source_dir || '',
                     width: data.width,
                     height: data.height,
                     thumbnail: data.thumbnail,
@@ -689,6 +763,7 @@ async function handleFiles(files) {
 
         log(`批量文件上传处理完成。`);
         renderFileList();
+        updateExportDestHint();
         const sortedIds = getSortedFileIds();
         if (sortedIds.length > 0 && (!currentFileId || !filesMap[currentFileId])) {
             selectFile(sortedIds[0]);
@@ -2941,17 +3016,33 @@ function updateExportDestHint() {
 
     if (mode === 'subfolder') {
         const sub = (subfolderInput && subfolderInput.value.trim()) ? subfolderInput.value.trim() : 'output';
-        exportDestHint.innerText = `目标: 原图目录/${sub}`;
-        if (customPathInput) customPathInput.style.display = 'none';
+        const fileIds = Object.keys(filesMap);
+        const sourceDirs = Array.from(new Set(
+            fileIds.map(id => filesMap[id].source_dir).filter(d => d && typeof d === 'string' && d.trim().length > 0)
+        ));
+
+        if (sourceDirs.length === 1) {
+            exportDestHint.innerText = `目标: ${sourceDirs[0]}/${sub}`;
+        } else if (sourceDirs.length > 1) {
+            exportDestHint.innerText = `目标: 各自原图目录/${sub}`;
+        } else if (fileIds.length > 0) {
+            exportDestHint.innerText = `目标: 原图目录/${sub} (拖拽图片建议指定路径)`;
+        } else {
+            exportDestHint.innerText = `目标: 原图目录/${sub}`;
+        }
+        if (customPathRow) customPathRow.style.display = 'none';
+        else if (customPathInput) customPathInput.style.display = 'none';
         if (subfolderInput) subfolderInput.style.display = 'block';
     } else if (mode === 'custom') {
         const cPath = (customPathInput && customPathInput.value.trim()) ? customPathInput.value.trim() : '';
-        exportDestHint.innerText = cPath ? `目标: ${cPath}` : '目标: 请在上方输入目标文件夹绝对路径';
-        if (customPathInput) customPathInput.style.display = 'block';
+        exportDestHint.innerText = cPath ? `目标: ${cPath}` : '目标: 请点击右侧“浏览”或输入目标绝对路径';
+        if (customPathRow) customPathRow.style.display = 'flex';
+        else if (customPathInput) customPathInput.style.display = 'block';
         if (subfolderInput) subfolderInput.style.display = 'none';
     } else {
         exportDestHint.innerText = '目标: 浏览器下载 ZIP 压缩包';
-        if (customPathInput) customPathInput.style.display = 'none';
+        if (customPathRow) customPathRow.style.display = 'none';
+        else if (customPathInput) customPathInput.style.display = 'none';
         if (subfolderInput) subfolderInput.style.display = 'none';
     }
 }
@@ -2963,6 +3054,24 @@ if (exportPathModeSelect) {
 }
 if (subfolderInput) subfolderInput.addEventListener('input', () => { updateExportDestHint(); savePathPreferences(); });
 if (customPathInput) customPathInput.addEventListener('input', () => { updateExportDestHint(); savePathPreferences(); });
+if (browseCustomPathBtn) {
+    browseCustomPathBtn.addEventListener('click', async () => {
+        try {
+            const res = await fetch('/api/pick_folder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: '选择切片保存的目标文件夹' })
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.folder && customPathInput) {
+                customPathInput.value = data.folder;
+                updateExportDestHint();
+                savePathPreferences();
+            }
+        } catch (_) {}
+    });
+}
 updateExportDestHint();
 
 exportBtn.addEventListener('click', async () => {
@@ -2973,7 +3082,7 @@ exportBtn.addEventListener('click', async () => {
     const subfolder = (subfolderInput && subfolderInput.value.trim()) ? subfolderInput.value.trim() : 'output';
 
     if (exportMode === 'custom' && !customPath) {
-        showToast('请输入有效的自定义保存绝对路径');
+        showToast('请输入有效的自定义保存绝对路径或点击“浏览”选择');
         if (customPathInput) customPathInput.focus();
         return;
     }
@@ -2987,6 +3096,8 @@ exportBtn.addEventListener('click', async () => {
     const filesPayload = Object.keys(filesMap).map(fileId => ({
         file_id: fileId,
         filename: filesMap[fileId].name,
+        source_dir: filesMap[fileId].source_dir || '',
+        source_path: filesMap[fileId].source_path || '',
         rects: (filesMap[fileId].rects || []).filter(r => !r.excluded),
         bg_type: filesMap[fileId].params.bg_type,
         auto_rotate: filesMap[fileId].params.auto_rotate,

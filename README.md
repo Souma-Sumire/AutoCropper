@@ -28,7 +28,7 @@ pip install pyinstaller
 ### 2. 执行打包
 
 ```bash
-pyinstaller --noconfirm --clean --onedir --name "AutoCropper" --add-data "templates;templates" --add-data "static;static" --add-data "models;models" --hidden-import "waitress" --exclude-module "tkinter" --exclude-module "unittest" --exclude-module "pydoc" app.py
+pyinstaller --noconfirm --clean --onedir --name "AutoCropper" --add-data "templates;templates" --add-data "static;static" --add-data "models;models" --hidden-import "waitress" --exclude-module "unittest" --exclude-module "pydoc" app.py
 ```
 
 > 注：若使用 Linux/macOS，将 `--add-data` 中的分号 `;` 替换为冒号 `:` 即可。
